@@ -1,38 +1,55 @@
 # RogueC
 
-![RogueC](gif/line-of-sight.gif)
+A roguelike in C: procedurally generated caves, ray-cast line of sight with fog of war, permadeath. C practice project, being completed into a full game that also runs in the browser.
 
-A roguelike in C. C practice project. The map generation algorithm used is based on Conway's Game of Life automaton. Field of view implementation relies on ray casting procedure using Bresenham's line algorithm to detect visible ground tiles.
+![RogueC, 2022 version](gif/line-of-sight.gif)
 
-Movement with WASD.
+*The 2022 version. Visible cells are now drawn bright and remembered cells dim.*
 
-## Build
+## Build and play
 
 ```
 make          # release build: build/release/rogue
 make run      # build and play
-make test     # unit tests with AddressSanitizer + UBSan
+./build/release/rogue 42    # play a specific seed (same seed, same cave)
+make test     # unit tests with AddressSanitizer + UndefinedBehaviorSanitizer
 make help     # all targets
 ```
 
-Needs a C17 compiler and ncurses (`libncursesw` on Linux).
+Needs a C17 compiler and ncurses (`libncursesw` on Linux). Any terminal size works; the view follows the player.
 
-## Tips
+## Controls
 
-### Printing UTF-8 in C
+| Action | Keys |
+|---|---|
+| Move | WASD, arrow keys, `hjkl`, numpad |
+| Move diagonally | `y u b n`, numpad `7 9 1 3` |
+| Wait a turn | `.`, numpad `5` |
+| Quit | `q` |
 
-You need to initialize the locale's encoding by calling `setlocale` at your program's start, like so:
+## Layout
 
 ```
-    setlocale(LC_CTYPE, "")
+src/core/            game logic in pure C: no I/O, no globals, deterministic per seed
+  rng                PCG32 random numbers
+  map                tiles, visibility, explored memory
+  gen_cave           cellular-automaton caves, trimmed to one connected region
+  line               Bresenham line walker
+  fov                field of view by ray casting
+  game               game state, actions, rules
+  render             game state -> grid of cells (glyph + style) for any frontend
+src/platform/term/   ncurses frontend
+tests/               unit tests of the core (no ncurses needed)
 ```
 
-This is normally carried out for you if you use some initialization function.
+## How it works
+
+- **Caves:** random noise (15 % wall) smoothed by 5 steps of a cellular automaton (Game-of-Life-like birth/death rules). A flood fill keeps only the largest connected region, so every floor cell is reachable.
+- **Field of view:** one Bresenham ray from the player to every cell on the square of radius 10, cut to a circle. A ray lights each cell it passes, including the first wall it hits, then stops. Casting to the whole perimeter (instead of at fixed angles) leaves no holes at any distance.
+- **Fog of war:** cells seen once stay on the map, drawn dim.
 
 ## Links
 
-[ASCII Table](https://theasciicode.com.ar/extended-ascii-code/block-graphic-character-ascii-code-219.html)
-
-[Generate Random Cave Levels Using Cellular Automata](https://gamedevelopment.tutsplus.com/tutorials/generate-random-cave-levels-using-cellular-automata--gamedev-9664)
-
-[Bresenham's Line Algorithm in Eight Directions](http://tech-algorithm.com/articles/drawing-line-using-bresenham-algorithm/)
+- [Generate Random Cave Levels Using Cellular Automata](https://gamedevelopment.tutsplus.com/tutorials/generate-random-cave-levels-using-cellular-automata--gamedev-9664)
+- [Bresenham's line algorithm](https://en.wikipedia.org/wiki/Bresenham%27s_line_algorithm)
+- [PCG random number generators](https://www.pcg-random.org/)
