@@ -11,7 +11,7 @@ int death_limit = 1;
 int birth_limit = 4;
 
 int num_sim_steps = 5;
-int **init_map()
+int **init_map(void)
 {
     int **map = malloc(map_size.x * sizeof(int *));
     for (int i = 0; i < map_size.x; i++)
@@ -103,9 +103,9 @@ int draw_map(int **map)
     for (int i = 0; i < map_size.x; i++)
         for (int j = 0; j < map_size.y; j++)
             if (*(*(map + i) + j) == 1)
-                mvprintw(j + map_offset.y, i + map_offset.x, t_wall());
+                mvaddstr(j + map_offset.y, i + map_offset.x, t_wall());
             else
-                mvprintw(j + map_offset.y, i + map_offset.x, t_ground());
+                mvaddstr(j + map_offset.y, i + map_offset.x, t_ground());
 
     return 0;
 }

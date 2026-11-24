@@ -10,7 +10,7 @@
 #define TURN_IN_RAD 6.28319
 
 int draw_fov(Player *user);
-void reset_visible();
+void reset_visible(void);
 void populate_visible(Player *user);
 void draw_visible(Player *user, int show_buf_len);
 

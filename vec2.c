@@ -1,10 +1,5 @@
 #include "vec2.h"
 
-int add(Vec2 v0, Vec2 v1)
-{
-    return 0;
-}
-
 int vec2equal(Vec2 v0, Vec2 v1)
 {
     if (v0.x == v1.x && v0.y == v1.y)
@@ -20,12 +15,9 @@ void line_to_buf(Vec2 *buf, int *curr_len, Vec2 v0, Vec2 v1)
     Vec2 d0 = {.x = 0, .y = 0};
     Vec2 d1 = {.x = 0, .y = 0};
 
-    d0.x = pd.x < 0 ? -1 : pd.x == 0 ? 0
-                                     : 1;
-    d0.y = pd.y < 0 ? -1 : pd.y == 0 ? 0
-                                     : 1;
-    d1.x = pd.x < 0 ? -1 : pd.x == 0 ? 0
-                                     : 1;
+    d0.x = pd.x < 0 ? -1 : pd.x == 0 ? 0 : 1;
+    d0.y = pd.y < 0 ? -1 : pd.y == 0 ? 0 : 1;
+    d1.x = pd.x < 0 ? -1 : pd.x == 0 ? 0 : 1;
 
     int longest = abs(pd.x);
     int shortest = abs(pd.y);
@@ -36,15 +28,15 @@ void line_to_buf(Vec2 *buf, int *curr_len, Vec2 v0, Vec2 v1)
         shortest = abs(pd.x);
 
         d1.x = 0;
-        d1.y = pd.y < 0 ? -1 : pd.y == 0 ? 0
-                                         : 1;
+        d1.y = pd.y < 0 ? -1 : pd.y == 0 ? 0 : 1;
     }
 
     int numerator = longest >> 1;
 
     for (int i = 0; i <= longest; i++)
     {
-        if (mvinch(v0.y, v0.x) == t_ground()[0] || mvinch(v0.y, v0.x) == t_visible()[0])
+        if (mvinch(v0.y, v0.x) == (chtype)t_ground()[0] ||
+            mvinch(v0.y, v0.x) == (chtype)t_visible()[0])
         {
             int contains = 0;
 

@@ -20,6 +20,6 @@ typedef struct PLAYER_
 Player *player_setup(Vec2 start_pos);
 int handle_input(int input, Player *user);
 int player_move(Vec2 pos, Player *user);
-int can_move(Vec2 pos, Player *user);
+int can_move(Vec2 pos);
 
 #endif

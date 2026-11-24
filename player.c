@@ -17,9 +17,6 @@ int handle_input(int input, Player *user)
 {
     Vec2 new_pos = {.x = user->pos.x, .y = user->pos.y};
 
-    int new_x = user->pos.x;
-    int new_y = user->pos.y;
-
     switch (input)
     {
     case 'w':
@@ -46,7 +43,7 @@ int handle_input(int input, Player *user)
         break;
     }
 
-    if (can_move(new_pos, user) == 0)
+    if (can_move(new_pos) == 0)
         player_move(new_pos, user);
     else /* prevents cursor from going into walls */
         move(user->pos.y, user->pos.x);
@@ -56,7 +53,7 @@ int handle_input(int input, Player *user)
 
 int player_move(Vec2 pos, Player *user)
 {
-    mvprintw(user->pos.y, user->pos.x, t_ground());
+    mvaddstr(user->pos.y, user->pos.x, t_ground());
 
     user->pos = pos;
 
@@ -65,9 +62,9 @@ int player_move(Vec2 pos, Player *user)
     return 0;
 }
 
-int can_move(Vec2 pos, Player *user)
+int can_move(Vec2 pos)
 {
-    if (mvinch(pos.y, pos.x) == t_visible()[0])
+    if (mvinch(pos.y, pos.x) == (chtype)t_visible()[0])
         return 0;
 
     return -1;

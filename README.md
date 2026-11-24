@@ -1,10 +1,21 @@
-# ROUGE C
+# RogueC
 
-![RougeC](https://raw.githubusercontent.com/NikolaVetnic/RougeC/master/gif/line-of-sight.gif)
+![RogueC](gif/line-of-sight.gif)
 
-Recreation of classic Rouge game in C. C practice project. The map generation algorithm used is based on Conway's Game of Life automaton. Field of view implementation relies on ray casting procedure using Bresenham's line algorithm to detect visible ground tiles.
+A roguelike in C. C practice project. The map generation algorithm used is based on Conway's Game of Life automaton. Field of view implementation relies on ray casting procedure using Bresenham's line algorithm to detect visible ground tiles.
 
 Movement with WASD.
+
+## Build
+
+```
+make          # release build: build/release/rogue
+make run      # build and play
+make test     # unit tests with AddressSanitizer + UBSan
+make help     # all targets
+```
+
+Needs a C17 compiler and ncurses (`libncursesw` on Linux).
 
 ## Tips
 
