@@ -4,6 +4,8 @@
 
 #include <stdio.h>
 
+#include "core/game.h"
+
 extern int test_failures;
 extern int test_checks;
 
@@ -26,6 +28,14 @@ extern int test_checks;
         printf("%s %s\n", test_failures == before_ ? "ok  " : "FAIL", #test_fn);                   \
     } while (0)
 
+/* Removes every monster from every level, for tests about something else. */
+static inline void clear_monsters(Game *g)
+{
+    for (int i = 0; i < DUNGEON_DEPTH; i++)
+        g->levels[i].monster_count = 0;
+    g->wander_odds = 0;
+}
+
 /* One per test file. */
 void run_rng_tests(void);
 void run_line_tests(void);
@@ -37,5 +47,6 @@ void run_render_tests(void);
 void run_msglog_tests(void);
 void run_ui_tests(void);
 void run_dungeon_tests(void);
+void run_monster_tests(void);
 
 #endif

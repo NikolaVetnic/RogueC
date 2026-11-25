@@ -1,4 +1,6 @@
 /* Terminal frontend: ncurses input and drawing around the core. */
+#define _POSIX_C_SOURCE 200809L /* clock_gettime */
+
 #include <locale.h>
 #include <ncurses.h>
 #include <stdio.h>
@@ -62,6 +64,10 @@ static void init_styles_8(void)
         [STYLE_STAIRS_LIT] = {COLOR_CYAN, A_BOLD},
         [STYLE_STAIRS_SEEN] = {COLOR_CYAN, 0},
         [STYLE_PLAYER] = {COLOR_YELLOW, A_BOLD},
+        [STYLE_MON_BEAST] = {COLOR_YELLOW, 0},
+        [STYLE_MON_HUMANOID] = {COLOR_GREEN, A_BOLD},
+        [STYLE_MON_UNDEAD] = {COLOR_WHITE, A_BOLD},
+        [STYLE_MON_BRUTE] = {COLOR_RED, A_BOLD},
         [STYLE_STATUS] = {COLOR_WHITE, A_REVERSE},
         [STYLE_TEXT] = {COLOR_WHITE, A_BOLD},
         [STYLE_TEXT_DIM] = {COLOR_WHITE, A_DIM},
@@ -87,6 +93,8 @@ static void init_styles(void)
         style_attr[STYLE_STATUS] = A_REVERSE;
         style_attr[STYLE_TEXT_DIM] = A_DIM;
         style_attr[STYLE_HEADING] = A_BOLD;
+        for (int s = STYLE_MON_BEAST; s <= STYLE_MON_BRUTE; s++)
+            style_attr[s] = A_BOLD;
         return;
     }
 
@@ -128,6 +136,13 @@ static int ui_key_for(int key)
     default:                          return key >= KEY_MIN ? UI_KEY_OTHER : key;
     }
     // clang-format on
+}
+
+static long now_ms(void)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (long)t.tv_sec * 1000 + t.tv_nsec / 1000000;
 }
 
 static void draw(const Cell *cells, int cols, int rows)
@@ -172,9 +187,19 @@ int main(int argc, char **argv)
 
     Cell *cells = NULL;
     int cols = 0, rows = 0;
+    long last = now_ms();
 
     while (game.running)
     {
+        if (ui.new_game) /* from the death screen */
+        {
+            game_free(&game);
+            seed = (uint64_t)time(NULL);
+            if (!game_init(&game, seed))
+                break;
+            ui_init(&ui);
+        }
+
         if (cols != COLS || rows != LINES) /* first frame or terminal resized */
         {
             Cell *resized = realloc(cells, (size_t)COLS * (size_t)LINES * sizeof *cells);
@@ -188,7 +213,11 @@ int main(int argc, char **argv)
 
         ui_render(&ui, &game, cells, cols, rows);
         draw(cells, cols, rows);
+        timeout(game.realtime ? 20 : -1); /* real time: wake up for the clock */
         int key = ui_key_for(getch());
+        long now = now_ms();
+        ui_update(&ui, &game, (int)(now - last));
+        last = now;
         if (key != 0)
             ui_key(&ui, &game, key);
     }

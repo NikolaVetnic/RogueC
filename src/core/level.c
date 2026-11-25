@@ -47,8 +47,31 @@ static Vec2 pick_cell(const Map *m, Rng *rng, const int *dist, int min_dist, int
     return vec2(-1, -1);
 }
 
-/* Up stairs anywhere; down stairs at least half the longest walk away. */
-static bool place_stairs(Level *lv, Rng *rng, int depth, int bottom)
+/* 3 + depth monsters of the depth's kinds on free floor, at least
+ * SPAWN_MIN_DIST steps from the arrival point (dist: distances from it). */
+static void spawn_monsters(Level *lv, Rng *rng, int depth, const int *dist, int *cells)
+{
+    const Map *m = &lv->map;
+    int want = 3 + depth < LEVEL_MAX_MONSTERS ? 3 + depth : LEVEL_MAX_MONSTERS;
+    for (int i = 0; i < want; i++)
+    {
+        int count = 0;
+        for (int y = 0; y < m->h; y++)
+            for (int x = 0; x < m->w; x++)
+                if (map_get(m, x, y) == TILE_FLOOR && dist[y * m->w + x] >= SPAWN_MIN_DIST &&
+                    level_monster_at(lv, vec2(x, y)) < 0)
+                    cells[count++] = y * m->w + x;
+        if (count == 0)
+            return;
+        int c = cells[rng_range(rng, 0, count - 1)];
+        level_add_monster(
+            lv, monster_make(monster_pick_kind(rng, depth), vec2(c % m->w, c / m->w), rng));
+    }
+}
+
+/* Up stairs on open floor; down stairs at least half the longest walk away;
+ * then the monsters. */
+static bool furnish(Level *lv, Rng *rng, int depth, int bottom)
 {
     Map *m = &lv->map;
     size_t n = (size_t)m->w * (size_t)m->h;
@@ -60,21 +83,22 @@ static bool place_stairs(Level *lv, Rng *rng, int depth, int bottom)
     {
         lv->stairs_up = pick_cell(m, rng, NULL, 0, cells);
         lv->stairs_down = vec2(-1, -1);
-        if (depth < bottom)
-        {
-            ok = path_distances(m, lv->stairs_up, dist);
-            int far = 0;
-            for (size_t i = 0; ok && i < n; i++)
-                if (dist[i] > far)
-                    far = dist[i];
-            if (ok)
-                lv->stairs_down = pick_cell(m, rng, dist, far / 2 > 1 ? far / 2 : 1, cells);
-        }
+        ok = path_distances(m, lv->stairs_up, dist);
+    }
+    if (ok && depth < bottom)
+    {
+        int far = 0;
+        for (size_t i = 0; i < n; i++)
+            if (dist[i] > far)
+                far = dist[i];
+        lv->stairs_down = pick_cell(m, rng, dist, far / 2 > 1 ? far / 2 : 1, cells);
     }
     if (ok && depth > 1)
         map_set(m, lv->stairs_up.x, lv->stairs_up.y, TILE_STAIRS_UP);
     if (ok && lv->stairs_down.x >= 0)
         map_set(m, lv->stairs_down.x, lv->stairs_down.y, TILE_STAIRS_DOWN);
+    if (ok)
+        spawn_monsters(lv, rng, depth, dist, cells);
 
     free(dist);
     free(cells);
@@ -94,7 +118,7 @@ bool level_generate(Level *lv, uint64_t seed, int depth, int bottom, int w, int 
     bool ok = lv->caves ? gen_cave(&lv->map, &rng, &CAVE_DEFAULTS) > 0
                         : gen_rooms(&lv->map, &rng, &ROOM_DEFAULTS) > 0;
     if (ok)
-        ok = place_stairs(lv, &rng, depth, bottom);
+        ok = furnish(lv, &rng, depth, bottom);
     if (!ok)
         level_free(lv);
     return ok;
@@ -103,4 +127,25 @@ bool level_generate(Level *lv, uint64_t seed, int depth, int bottom, int w, int 
 void level_free(Level *lv)
 {
     map_free(&lv->map);
+}
+
+int level_monster_at(const Level *lv, Vec2 pos)
+{
+    for (int i = 0; i < lv->monster_count; i++)
+        if (vec2_eq(lv->monsters[i].pos, pos))
+            return i;
+    return -1;
+}
+
+bool level_add_monster(Level *lv, Monster m)
+{
+    if (lv->monster_count >= LEVEL_MAX_MONSTERS)
+        return false;
+    lv->monsters[lv->monster_count++] = m;
+    return true;
+}
+
+void level_remove_monster(Level *lv, int i)
+{
+    lv->monsters[i] = lv->monsters[--lv->monster_count];
 }

@@ -34,6 +34,7 @@ static bool screen_has(const char *text)
 static void open_game(Game *g)
 {
     game_init(g, 11);
+    clear_monsters(g);
     map_fill(g->map, TILE_FLOOR);
     g->player.pos = vec2(50, 20);
 }

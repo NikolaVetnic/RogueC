@@ -1,6 +1,6 @@
 # RogueC
 
-A roguelike in C: a procedurally generated dungeon ten levels deep (rooms and corridors at the top, caves below), ray-cast line of sight with fog of war, permadeath. Plays in the terminal, in a desktop window, and in the browser (WebAssembly).
+A roguelike in C: a procedurally generated dungeon ten levels deep (rooms and corridors at the top, caves below), monsters that hunt you, ray-cast line of sight with fog of war, permadeath, and a choice of turn-based or real-time play. Plays in the terminal, in a desktop window, and in the browser (WebAssembly).
 
 ![RogueC, 2022 version](gif/line-of-sight.gif)
 
@@ -29,13 +29,16 @@ Any terminal or window size works; the view follows the player. `make web` write
 |---|---|
 | Move | WASD, arrow keys, `hjkl`, numpad |
 | Move diagonally | `y u b n`, numpad `7 9 1 3` |
+| Attack | move into a monster |
 | Wait a turn | `.`, numpad `5` |
+| Rest until healed | `Z` |
 | Stairs down / up | `>` / `<`, standing on them |
 | Message history | `m`, Ctrl-P |
+| Real time on / off | `T` |
 | Help | `?` |
 | Quit | `q` |
 
-On the help and history screens, any key goes back (in the history, the arrows, PgUp/PgDn and Home/End scroll).
+After death, Enter starts a new game and `q` quits. On the help and history screens, any key goes back (in the history, the arrows, PgUp/PgDn and Home/End scroll).
 
 ## Layout
 
@@ -47,6 +50,9 @@ src/core/            game logic in pure C: no I/O, no globals, deterministic per
   gen_rooms          rectangular rooms joined by L-shaped corridors
   level              one level: generator by depth, stairs placement
   path               distance maps (breadth-first search)
+  combat             stats, hit chance, damage
+  monster            the monster table and monster instances
+  ai                 what a monster does on its turn
   line               Bresenham line walker
   fov                field of view by ray casting
   game               game state, actions, rules
@@ -65,6 +71,9 @@ tests/               unit tests of the core (no ncurses or raylib needed)
 - **Dungeon:** ten levels, each generated from the seed and its depth alone (its own random-number stream), all at the start, and kept as you left them. Depths 1–3 are rooms and corridors, then the chance of caves rises 25 % a level, so from depth 7 on every level is a cave. Depth 1 has no up stairs yet.
 - **Rooms:** up to 12 rectangles placed at random without touching, sorted left to right and joined each to the next by an L-shaped corridor (so all are connected), plus a few extra corridors for loops.
 - **Stairs:** the up stairs (on depth 1 the entrance) go on open floor, inside a room or cave rather than a corridor. A distance map from them gives every cell's walking distance, and the down stairs go at least half the longest walk away.
+- **Monsters:** ten kinds, from rats and bats near the top to trolls and wraiths at the bottom; each level starts with 3 + depth of them, away from the stairs you arrive by, and more wander in over time. They sleep until they see you, then chase you along a distance map from you (recomputed every tick), keep hunting for 20 moves after losing sight of you, and attack when next to you. Bats flutter at random.
+- **Combat:** chance to hit = 60 % + 5 % × (attack − defence), between 5 and 95 %; damage is a roll in the attacker's range. You heal 1 HP every 10 turns.
+- **Time:** an energy scheduler. Every tick each creature gains its speed in energy (100 = normal) and acts on reaching 100, so a speed-150 bat acts three times in two ticks. Turn-based, ticks run until it's your move again; in real time, one tick runs every 300 ms, and a key pressed before you're ready is kept until you are. Help and history pause real time.
 - **Caves:** random noise (15 % wall) smoothed by 5 steps of a cellular automaton (Game-of-Life-like birth/death rules). A flood fill keeps only the largest connected region, so every floor cell is reachable.
 - **Field of view:** one Bresenham ray from the player to every cell on the square of radius 10, cut to a circle. A ray lights each cell it passes, including the first wall it hits, then stops. Casting to the whole perimeter (instead of at fixed angles) leaves no holes at any distance. A last pass lights walls whose ray was blocked by another wall although the floor in front of them is in view (about one wall in five otherwise stays dark).
 - **Fog of war:** cells seen once stay on the map, drawn in cool blue; what is in view is drawn in warm light.

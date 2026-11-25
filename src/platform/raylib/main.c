@@ -229,6 +229,13 @@ static void frame(void *arg)
     fit_canvas(app);
 #endif
     handle_input(app);
+    ui_update(&app->ui, &app->game, (int)(GetFrameTime() * 1000.0f));
+    if (app->ui.new_game) /* from the death screen */
+    {
+        game_free(&app->game);
+        app->quit = !game_init(&app->game, (uint64_t)time(NULL));
+        ui_init(&app->ui);
+    }
 
 #ifdef __EMSCRIPTEN__
     if (app->quit) /* a page can't close itself: start a new game instead */
@@ -327,9 +334,20 @@ int main(int argc, char **argv)
     else
     {
         SetTargetFPS(60);
-        EnableEventWaiting(); /* turn-based: sleep until there's input */
+        bool waiting = false;
         while (!app.quit && !WindowShouldClose())
+        {
+            /* Turn-based: sleep until there's input. Real time: keep the clock running. */
+            if (waiting == app.game.realtime)
+            {
+                waiting = !app.game.realtime;
+                if (waiting)
+                    EnableEventWaiting();
+                else
+                    DisableEventWaiting();
+            }
             frame(&app);
+        }
     }
 
     UnloadFont(app.font);

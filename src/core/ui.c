@@ -4,8 +4,9 @@
 
 enum
 {
-    LOG_PAGE = 10, /* lines per Page Up / Page Down in the history */
-    CTRL_P = 16,   /* message history, as in Rogue */
+    LOG_PAGE = 10,    /* lines per Page Up / Page Down in the history */
+    CTRL_P = 16,      /* message history, as in Rogue */
+    MAX_CATCH_UP = 4, /* real time: ticks run at most per update (after a stall) */
 };
 
 void ui_init(Ui *ui)
@@ -27,6 +28,7 @@ static Action action_for_key(int key)
     case 'b': case '1': case UI_KEY_END:                           return ACTION_MOVE_SW;
     case 'n': case '3': case UI_KEY_PAGE_DOWN:                     return ACTION_MOVE_SE;
     case '.': case '5': case UI_KEY_CENTER:                        return ACTION_WAIT;
+    case 'Z':                                                      return ACTION_REST;
     case '>':                                                      return ACTION_DESCEND;
     case '<':                                                      return ACTION_ASCEND;
     case 'q': case 'Q':                                            return ACTION_QUIT;
@@ -58,6 +60,27 @@ static void log_key(Ui *ui, const Game *g, int key)
         ui->scroll = 0;
 }
 
+/* Turn-based, or ready: act now. Real time and not ready: keep the latest
+ * move for when the player is (quitting never waits). */
+static void act(Ui *ui, Game *g, Action a)
+{
+    if (a == ACTION_NONE)
+        return;
+    if (g->realtime && a != ACTION_QUIT && !game_ready(g))
+        ui->pending = a;
+    else
+    {
+        ui->pending = ACTION_NONE;
+        game_step(g, a);
+    }
+}
+
+static void check_death(Ui *ui, const Game *g)
+{
+    if (g->dead)
+        ui->screen = SCREEN_DEATH;
+}
+
 void ui_key(Ui *ui, Game *g, int key)
 {
     switch (ui->screen)
@@ -66,9 +89,19 @@ void ui_key(Ui *ui, Game *g, int key)
         if (key == '?')
             ui->screen = SCREEN_HELP;
         else if (key == 'm' || key == 'M' || key == CTRL_P)
-            *ui = (Ui){.screen = SCREEN_LOG};
+        {
+            ui->screen = SCREEN_LOG;
+            ui->scroll = 0;
+        }
+        else if (key == 'T')
+        {
+            game_set_realtime(g, !g->realtime);
+            ui->pending = ACTION_NONE;
+            ui->clock_ms = 0;
+        }
         else
-            game_step(g, action_for_key(key));
+            act(ui, g, action_for_key(key));
+        check_death(ui, g);
         break;
     case SCREEN_HELP:
         ui->screen = SCREEN_MAP; /* any key */
@@ -76,7 +109,36 @@ void ui_key(Ui *ui, Game *g, int key)
     case SCREEN_LOG:
         log_key(ui, g, key);
         break;
+    case SCREEN_DEATH:
+        if (key == '\n' || key == ' ')
+            ui->new_game = true;
+        else if (key == 'q' || key == 'Q' || key == 27)
+            g->running = false;
+        break;
     }
+}
+
+void ui_update(Ui *ui, Game *g, int elapsed_ms)
+{
+    if (!g->realtime || ui->screen != SCREEN_MAP || g->dead)
+    {
+        ui->clock_ms = 0;
+        return;
+    }
+    ui->clock_ms += elapsed_ms;
+    if (ui->clock_ms > MAX_CATCH_UP * UI_TICK_MS)
+        ui->clock_ms = MAX_CATCH_UP * UI_TICK_MS;
+
+    for (;;)
+    {
+        if (ui->pending != ACTION_NONE && game_ready(g))
+            act(ui, g, ui->pending);
+        if (ui->clock_ms < UI_TICK_MS || g->dead)
+            break;
+        ui->clock_ms -= UI_TICK_MS;
+        game_tick(g);
+    }
+    check_death(ui, g);
 }
 
 /* ---- screens -------------------------------------------------------------- */
@@ -88,9 +150,12 @@ static const struct
 } HELP_KEYS[] = {
     {"Move", "w a s d   arrow keys   h j k l   numpad"},
     {"Move diagonally", "y u b n   Home PgUp End PgDn   numpad 7 9 1 3"},
+    {"Attack", "move into a monster"},
     {"Wait a turn", ".   numpad 5"},
+    {"Rest until healed", "Z"},
     {"Stairs down / up", ">   <   (standing on them)"},
     {"Message history", "m   Ctrl-P"},
+    {"Real time on / off", "T   (the dungeon moves on its own; help and history pause it)"},
     {"Help", "?"},
     {"Quit", "q"},
 };
@@ -139,6 +204,14 @@ static void render_help(Cell *cells, int cols, int rows)
         render_text(cells, cols, rows, LEFT + 4, y, HELP_LEGEND[i].what, STYLE_TEXT);
     }
 
+    /* Monsters, weakest first, in their colours. */
+    for (int k = 0; k < MON_COUNT; k++)
+        if (y < rows && LEFT + 2 * k < cols)
+            cells[y * cols + LEFT + 2 * k] = (Cell){
+                .glyph = MONSTERS[k].glyph, .style = (uint8_t)render_monster_style((MonsterKind)k)};
+    render_text(cells, cols, rows, LEFT + 2 * MON_COUNT + 2, y++, "monsters, deeper ones tougher",
+                STYLE_TEXT);
+
     render_text(cells, cols, rows, LEFT, y + 1, "Press any key to go back.", STYLE_TEXT_DIM);
 }
 
@@ -176,6 +249,29 @@ static void render_history(Ui *ui, const Game *g, Cell *cells, int cols, int row
     }
 }
 
+static void render_death(const Game *g, Cell *cells, int cols, int rows)
+{
+    enum
+    {
+        LEFT = 2,
+    };
+    char text[128];
+    MonsterKind k = g->killer;
+
+    render_clear(cells, cols, rows, STYLE_DEFAULT);
+    render_text(cells, cols, rows, LEFT, 1, "You died.", STYLE_HEADING);
+    snprintf(text, sizeof text, "Killed by %s %s on depth %d, turn %d.", monster_article(k),
+             MONSTERS[k].name, g->depth, g->turn);
+    render_text(cells, cols, rows, LEFT, 3, text, STYLE_TEXT);
+    snprintf(text, sizeof text, "Seed %llu", (unsigned long long)g->seed);
+    render_text(cells, cols, rows, LEFT, 4, text, STYLE_TEXT_DIM);
+
+    int x = render_text(cells, cols, rows, LEFT, 6, "Enter", STYLE_KEY);
+    x = render_text(cells, cols, rows, x, 6, ": new game    ", STYLE_TEXT);
+    x = render_text(cells, cols, rows, x, 6, "q", STYLE_KEY);
+    render_text(cells, cols, rows, x, 6, ": quit", STYLE_TEXT);
+}
+
 void ui_render(Ui *ui, const Game *g, Cell *cells, int cols, int rows)
 {
     if (cols <= 0 || rows <= 0)
@@ -191,6 +287,9 @@ void ui_render(Ui *ui, const Game *g, Cell *cells, int cols, int rows)
         break;
     case SCREEN_LOG:
         render_history(ui, g, cells, cols, rows);
+        break;
+    case SCREEN_DEATH:
+        render_death(g, cells, cols, rows);
         break;
     }
 }

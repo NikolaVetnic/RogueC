@@ -18,6 +18,10 @@ typedef enum
     STYLE_STAIRS_LIT,
     STYLE_STAIRS_SEEN,
     STYLE_PLAYER,
+    STYLE_MON_BEAST, /* one style per MonsterLook */
+    STYLE_MON_HUMANOID,
+    STYLE_MON_UNDEAD,
+    STYLE_MON_BRUTE,
     STYLE_STATUS,
     STYLE_TEXT,     /* messages since the last action, screen text */
     STYLE_TEXT_DIM, /* older messages, hints */
@@ -58,6 +62,9 @@ extern const StyleColor STYLE_COLORS[STYLE_COUNT];
  * player, the two newest messages on top when there are at least 10 rows, and
  * a status line on the last row when there are at least two. */
 void render_game(const Game *g, Cell *cells, int cols, int rows);
+
+/* The style a monster kind is drawn in. */
+Style render_monster_style(MonsterKind kind);
 
 /* Sets every cell to a blank of `style`. */
 void render_clear(Cell *cells, int cols, int rows, Style style);

@@ -23,6 +23,7 @@ static void moves_respect_walls(void)
 {
     Game g;
     game_init(&g, 3);
+    clear_monsters(&g);
     map_fill(g.map, TILE_WALL);
     g.player.pos = vec2(10, 10);
     map_set(g.map, 10, 10, TILE_FLOOR);
@@ -69,6 +70,7 @@ static void events_are_logged(void)
 {
     Game g;
     game_init(&g, 3);
+    clear_monsters(&g);
     CHECK(msglog_len(&g.log) == 1);
     CHECK(msglog_get(&g.log, 0)->serial >= g.fresh_serial);
 
@@ -100,6 +102,7 @@ static void descend_to_the_bottom(void)
     {
         Game g;
         CHECK(game_init(&g, seed));
+        clear_monsters(&g);
         int *dist = malloc((size_t)g.map->w * (size_t)g.map->h * sizeof *dist);
 
         while (g.depth < DUNGEON_DEPTH)
@@ -108,6 +111,7 @@ static void descend_to_the_bottom(void)
             path_distances(g.map, target, dist);
             for (int steps = 0; !vec2_eq(g.player.pos, target) && steps < 1000; steps++)
             {
+                clear_monsters(&g); /* wanderers arrive over time; this test is about the levels */
                 int here = dist[g.player.pos.y * g.map->w + g.player.pos.x];
                 for (int k = 0; k < 8; k++)
                 {
@@ -121,6 +125,7 @@ static void descend_to_the_bottom(void)
                 }
             }
             int depth = g.depth;
+            clear_monsters(&g);
             CHECK(game_step(&g, ACTION_DESCEND));
             if (g.depth != depth + 1)
                 break; /* stuck: reported by the CHECK above */
@@ -138,6 +143,7 @@ static void stairs_go_both_ways_and_levels_persist(void)
 {
     Game g;
     game_init(&g, 21);
+    clear_monsters(&g);
     CHECK(g.depth == 1);
     CHECK(!game_step(&g, ACTION_ASCEND)); /* depth 1: the entrance is plain floor */
     CHECK(strcmp(msglog_get(&g.log, 0)->text, "There are no stairs up here.") == 0);

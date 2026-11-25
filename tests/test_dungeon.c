@@ -81,9 +81,9 @@ static void distances_count_diagonal_steps(void)
 
     CHECK(path_distances(&m, vec2(1, 1), dist));
     CHECK(dist[1 * 12 + 1] == 0);
-    CHECK(dist[4 * 12 + 4] == 3); /* diagonal: max(dx, dy) */
+    CHECK(dist[4 * 12 + 4] == 3);  /* diagonal: max(dx, dy) */
     CHECK(dist[1 * 12 + 6] == 10); /* around the wall: 5 steps to (5, 6), 5 up */
-    CHECK(dist[0] == -1);         /* wall */
+    CHECK(dist[0] == -1);          /* wall */
     CHECK(dist[1 * 12 + 5] == -1);
 
     CHECK(path_distances(&m, vec2(0, 0), dist)); /* from a wall: nothing reached */
@@ -188,8 +188,33 @@ static void same_seed_and_depth_same_level(void)
     level_free(&c);
 }
 
+/* 3 + depth monsters of the depth's kinds, on floor, away from the arrival point. */
+static void levels_start_with_monsters(void)
+{
+    for (uint64_t seed = 0; seed < 10; seed++)
+        for (int depth = 1; depth <= 10; depth++)
+        {
+            Level lv;
+            level_generate(&lv, seed, depth, 10, W, H);
+            CHECK(lv.monster_count == 3 + depth);
+            path_distances(&lv.map, lv.stairs_up, dist);
+            for (int i = 0; i < lv.monster_count; i++)
+            {
+                const Monster *m = &lv.monsters[i];
+                const MonsterInfo *info = monster_info(m);
+                CHECK(info->min_depth <= depth && depth <= info->max_depth);
+                CHECK(map_get(&lv.map, m->pos.x, m->pos.y) == TILE_FLOOR);
+                CHECK(dist[m->pos.y * W + m->pos.x] >= SPAWN_MIN_DIST);
+                CHECK(level_monster_at(&lv, m->pos) == i); /* one per cell */
+                CHECK(m->hp == info->stats.hp_max);
+            }
+            level_free(&lv);
+        }
+}
+
 void run_dungeon_tests(void)
 {
+    RUN(levels_start_with_monsters);
     RUN(distances_count_diagonal_steps);
     RUN(rooms_are_connected_and_bordered);
     RUN(rooms_need_room);

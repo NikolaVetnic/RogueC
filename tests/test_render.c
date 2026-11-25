@@ -40,6 +40,7 @@ static void unexplored_cells_are_blank_and_seen_cells_dim(void)
 {
     Game g;
     game_init(&g, 5);
+    clear_monsters(&g);
     map_clear_visible(g.map);
     map_clear_explored(g.map);
     render_game(&g, cells, 50, 20);
@@ -81,6 +82,7 @@ static void messages_on_top(void)
 {
     Game g;
     game_init(&g, 5);
+    clear_monsters(&g);
     msglog_add(&g.log, 0, "Second");
     render_game(&g, cells, 50, 20);
     CHECK(cells[1].glyph == 'Y' && cells[1].style == STYLE_TEXT); /* "You enter..." */
@@ -102,6 +104,7 @@ static void stairs_are_drawn(void)
 {
     Game g;
     game_init(&g, 5);
+    clear_monsters(&g);
     Vec2 down = g.levels[0].stairs_down; /* on open floor: the cell west is floor */
     g.player.pos = vec2(down.x - 1, down.y);
     game_step(&g, ACTION_WAIT); /* looks around */

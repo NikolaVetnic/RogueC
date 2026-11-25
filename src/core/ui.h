@@ -12,6 +12,7 @@ typedef enum
     SCREEN_MAP,
     SCREEN_HELP,
     SCREEN_LOG,
+    SCREEN_DEATH,
 } Screen;
 
 /* A key is a Unicode character (Esc = 27, Enter = '\n') or one of these codes
@@ -30,15 +31,27 @@ enum
     UI_KEY_OTHER,  /* any other key: closes a screen */
 };
 
+enum
+{
+    UI_TICK_MS = 300, /* real time: one tick (a normal-speed move) this often */
+};
+
 typedef struct
 {
     Screen screen;
-    int scroll; /* message history: lines hidden below the newest shown */
+    int scroll;     /* message history: lines hidden below the newest shown */
+    Action pending; /* real time: pressed before the player was ready */
+    int clock_ms;   /* real time: time since the last tick */
+    bool new_game;  /* the player asked for a new game: the frontend starts one */
 } Ui;
 
 void ui_init(Ui *ui);
-/* Handles one key press. The game may have stopped afterwards (g->running). */
+/* Handles one key press. The game may have stopped afterwards (g->running),
+ * or ui->new_game may ask for a new one. */
 void ui_key(Ui *ui, Game *g, int key);
+/* Call every frame with the time since the last call. In real time it runs
+ * the world's ticks and the buffered move; on other screens time stands still. */
+void ui_update(Ui *ui, Game *g, int elapsed_ms);
 /* Fills cells[rows * cols] with the current screen. Keeps ui->scroll in range
  * for this size, so it takes Ui by pointer. */
 void ui_render(Ui *ui, const Game *g, Cell *cells, int cols, int rows);
