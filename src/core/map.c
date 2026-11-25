@@ -10,6 +10,8 @@ static const struct
 } TILE_INFO[TILE_COUNT] = {
     [TILE_WALL] = {false, false},
     [TILE_FLOOR] = {true, true},
+    [TILE_STAIRS_DOWN] = {true, true},
+    [TILE_STAIRS_UP] = {true, true},
 };
 
 static size_t cell_count(const Map *m)

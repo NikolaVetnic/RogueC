@@ -15,6 +15,8 @@ typedef enum
     STYLE_FLOOR_SEEN, /* floor remembered, out of view */
     STYLE_WALL_LIT,
     STYLE_WALL_SEEN,
+    STYLE_STAIRS_LIT,
+    STYLE_STAIRS_SEEN,
     STYLE_PLAYER,
     STYLE_STATUS,
     STYLE_TEXT,     /* messages since the last action, screen text */
@@ -49,6 +51,8 @@ extern const StyleColor STYLE_COLORS[STYLE_COUNT];
 #define GLYPH_WALL 0x2588u /* full block; graphical frontends draw it as a filled cell */
 #define GLYPH_FLOOR '.'
 #define GLYPH_PLAYER '@'
+#define GLYPH_STAIRS_DOWN '>'
+#define GLYPH_STAIRS_UP '<'
 
 /* Map screen: fills cells[rows * cols] (row-major) with the map centred on the
  * player, the two newest messages on top when there are at least 10 rows, and

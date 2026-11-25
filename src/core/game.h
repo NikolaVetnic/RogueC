@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "core/level.h"
 #include "core/map.h"
 #include "core/msglog.h"
 #include "core/rng.h"
@@ -23,6 +24,8 @@ typedef enum
     ACTION_MOVE_W,
     ACTION_MOVE_NW,
     ACTION_WAIT,
+    ACTION_DESCEND,
+    ACTION_ASCEND,
     ACTION_QUIT,
 } Action;
 
@@ -33,11 +36,19 @@ typedef struct
     int hp_max;
 } Player;
 
+enum
+{
+    DUNGEON_DEPTH = 10, /* levels */
+};
+
+/* Owns its levels: free with game_free. Copying a Game shares them. */
 typedef struct
 {
     uint64_t seed;
     Rng rng;
-    Map map;
+    Level *levels; /* DUNGEON_DEPTH of them, all generated at the start */
+    int depth;     /* current level, 1 = top */
+    Map *map;      /* the current level's map */
     Player player;
     int turn;
     int fov_radius;
@@ -46,7 +57,8 @@ typedef struct
     int fresh_serial; /* messages from this serial on came after the last action */
 } Game;
 
-/* Generates the first level from `seed`. Returns false if out of memory. */
+/* Generates the dungeon from `seed` and puts the player at the entrance of
+ * depth 1. Returns false if out of memory. */
 bool game_init(Game *g, uint64_t seed);
 void game_free(Game *g);
 

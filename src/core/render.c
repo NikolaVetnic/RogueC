@@ -18,6 +18,8 @@ const StyleColor STYLE_COLORS[STYLE_COUNT] = {
     [STYLE_FLOOR_SEEN] = {.fg = {54, 62, 86}},
     [STYLE_WALL_LIT] = {.fg = {122, 104, 84}},
     [STYLE_WALL_SEEN] = {.fg = {36, 41, 58}},
+    [STYLE_STAIRS_LIT] = {.fg = {110, 222, 206}},
+    [STYLE_STAIRS_SEEN] = {.fg = {62, 108, 118}},
     [STYLE_PLAYER] = {.fg = {255, 210, 70}},
     [STYLE_STATUS] = {.fg = {222, 212, 192}, .bg = {50, 45, 40}, .has_bg = true},
     [STYLE_TEXT] = {.fg = {226, 220, 208}},
@@ -48,7 +50,7 @@ static int camera_origin(int map_size, int view_size, int player)
 
 static void render_cell(const Game *g, Cell *cells, int cols, int sx, int sy, int mx, int my)
 {
-    const Map *m = &g->map;
+    const Map *m = g->map;
 
     if (vec2_eq(g->player.pos, vec2(mx, my)))
         put(cells, cols, sx, sy, GLYPH_PLAYER, STYLE_PLAYER);
@@ -57,10 +59,21 @@ static void render_cell(const Game *g, Cell *cells, int cols, int sx, int sy, in
     else
     {
         bool lit = map_is_visible(m, mx, my);
-        if (map_get(m, mx, my) == TILE_WALL)
+        switch (map_get(m, mx, my))
+        {
+        case TILE_WALL:
             put(cells, cols, sx, sy, GLYPH_WALL, lit ? STYLE_WALL_LIT : STYLE_WALL_SEEN);
-        else
+            break;
+        case TILE_STAIRS_DOWN:
+        case TILE_STAIRS_UP:
+            put(cells, cols, sx, sy,
+                map_get(m, mx, my) == TILE_STAIRS_DOWN ? GLYPH_STAIRS_DOWN : GLYPH_STAIRS_UP,
+                lit ? STYLE_STAIRS_LIT : STYLE_STAIRS_SEEN);
+            break;
+        default:
             put(cells, cols, sx, sy, GLYPH_FLOOR, lit ? STYLE_FLOOR_LIT : STYLE_FLOOR_SEEN);
+            break;
+        }
     }
 }
 
@@ -92,8 +105,8 @@ static void render_status(const Game *g, Cell *cells, int cols, int row)
 {
     char text[128];
     snprintf(text, sizeof text,
-             " Seed %" PRIu64 "   Turn %d   HP %d/%d      ? help   m messages   q quit", g->seed,
-             g->turn, g->player.hp, g->player.hp_max);
+             " Depth %d   HP %d/%d   Turn %d   Seed %" PRIu64 "      ? help   m messages   q quit",
+             g->depth, g->player.hp, g->player.hp_max, g->turn, g->seed);
 
     render_clear(cells + row * cols, cols, 1, STYLE_STATUS);
     render_text(cells, cols, row + 1, 0, row, text, STYLE_STATUS);
@@ -123,8 +136,8 @@ void render_game(const Game *g, Cell *cells, int cols, int rows)
     int log_rows = rows >= LOG_MIN_ROWS ? LOG_LINES : 0;
     int status_rows = rows >= 2 ? 1 : 0;
     int view_rows = rows - log_rows - status_rows;
-    int cam_x = camera_origin(g->map.w, cols, g->player.pos.x);
-    int cam_y = camera_origin(g->map.h, view_rows, g->player.pos.y);
+    int cam_x = camera_origin(g->map->w, cols, g->player.pos.x);
+    int cam_y = camera_origin(g->map->h, view_rows, g->player.pos.y);
 
     render_log(g, cells, cols, log_rows);
     Cell *view = cells + log_rows * cols;

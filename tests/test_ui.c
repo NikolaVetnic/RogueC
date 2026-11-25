@@ -34,7 +34,7 @@ static bool screen_has(const char *text)
 static void open_game(Game *g)
 {
     game_init(g, 11);
-    map_fill(&g->map, TILE_FLOOR);
+    map_fill(g->map, TILE_FLOOR);
     g->player.pos = vec2(50, 20);
 }
 
@@ -103,7 +103,7 @@ static void history_shows_messages_and_scrolls(void)
 
     ui_key(&ui, &g, UI_KEY_HOME); /* oldest: the welcome message on the top line */
     ui_render(&ui, &g, cells, COLS, ROWS);
-    CHECK(row_has(2, 3, "    0  You enter the caves."));
+    CHECK(row_has(2, 3, "    0  You enter the dungeon."));
     CHECK(ui.scroll == 61 - (ROWS - 3)); /* clamped to a full page */
 
     ui_key(&ui, &g, UI_KEY_END);

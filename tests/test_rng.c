@@ -51,8 +51,26 @@ static void chance_matches_percent(void)
     CHECK(rng_chance(&r, 100));
 }
 
+static void streams_differ_and_repeat(void)
+{
+    Rng a, b, c;
+    rng_seed_stream(&a, 42, 1);
+    rng_seed_stream(&b, 42, 1);
+    rng_seed_stream(&c, 42, 2);
+    int same_ab = 0, same_ac = 0;
+    for (int i = 0; i < 100; i++)
+    {
+        uint32_t x = rng_next(&a), y = rng_next(&b), z = rng_next(&c);
+        same_ab += x == y;
+        same_ac += x == z;
+    }
+    CHECK(same_ab == 100);
+    CHECK(same_ac < 5);
+}
+
 void run_rng_tests(void)
 {
+    RUN(streams_differ_and_repeat);
     RUN(same_seed_same_sequence);
     RUN(different_seeds_differ);
     RUN(range_stays_in_bounds_and_hits_both_ends);

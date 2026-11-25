@@ -27,6 +27,8 @@ static Action action_for_key(int key)
     case 'b': case '1': case UI_KEY_END:                           return ACTION_MOVE_SW;
     case 'n': case '3': case UI_KEY_PAGE_DOWN:                     return ACTION_MOVE_SE;
     case '.': case '5': case UI_KEY_CENTER:                        return ACTION_WAIT;
+    case '>':                                                      return ACTION_DESCEND;
+    case '<':                                                      return ACTION_ASCEND;
     case 'q': case 'Q':                                            return ACTION_QUIT;
     default:                                                       return ACTION_NONE;
     }
@@ -87,6 +89,7 @@ static const struct
     {"Move", "w a s d   arrow keys   h j k l   numpad"},
     {"Move diagonally", "y u b n   Home PgUp End PgDn   numpad 7 9 1 3"},
     {"Wait a turn", ".   numpad 5"},
+    {"Stairs down / up", ">   <   (standing on them)"},
     {"Message history", "m   Ctrl-P"},
     {"Help", "?"},
     {"Quit", "q"},
@@ -103,6 +106,8 @@ static const struct
     {GLYPH_FLOOR, STYLE_FLOOR_SEEN, "floor remembered"},
     {GLYPH_WALL, STYLE_WALL_LIT, "rock in view"},
     {GLYPH_WALL, STYLE_WALL_SEEN, "rock remembered"},
+    {GLYPH_STAIRS_DOWN, STYLE_STAIRS_LIT, "stairs down"},
+    {GLYPH_STAIRS_UP, STYLE_STAIRS_LIT, "stairs up"},
 };
 
 static void render_help(Cell *cells, int cols, int rows)

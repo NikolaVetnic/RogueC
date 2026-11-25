@@ -1,5 +1,6 @@
 #include "test.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "core/game.h"
@@ -10,8 +11,8 @@ static void player_starts_on_floor_and_sees_around(void)
     {
         Game g;
         CHECK(game_init(&g, seed));
-        CHECK(map_get(&g.map, g.player.pos.x, g.player.pos.y) == TILE_FLOOR);
-        CHECK(map_is_visible(&g.map, g.player.pos.x, g.player.pos.y));
+        CHECK(map_get(g.map, g.player.pos.x, g.player.pos.y) == TILE_FLOOR);
+        CHECK(map_is_visible(g.map, g.player.pos.x, g.player.pos.y));
         CHECK(g.running && g.turn == 0);
         game_free(&g);
     }
@@ -22,10 +23,10 @@ static void moves_respect_walls(void)
 {
     Game g;
     game_init(&g, 3);
-    map_fill(&g.map, TILE_WALL);
+    map_fill(g.map, TILE_WALL);
     g.player.pos = vec2(10, 10);
-    map_set(&g.map, 10, 10, TILE_FLOOR);
-    map_set(&g.map, 11, 9, TILE_FLOOR); /* north-east */
+    map_set(g.map, 10, 10, TILE_FLOOR);
+    map_set(g.map, 11, 9, TILE_FLOOR); /* north-east */
 
     CHECK(!game_step(&g, ACTION_MOVE_N));
     CHECK(vec2_eq(g.player.pos, vec2(10, 10)) && g.turn == 0);
@@ -56,9 +57,9 @@ static void games_are_deterministic(void)
     }
     CHECK(vec2_eq(a.player.pos, b.player.pos));
     CHECK(a.turn == b.turn);
-    size_t n = (size_t)a.map.w * (size_t)a.map.h;
-    CHECK(memcmp(a.map.tiles, b.map.tiles, n) == 0);
-    CHECK(memcmp(a.map.explored, b.map.explored, n * sizeof *a.map.explored) == 0);
+    size_t n = (size_t)a.map->w * (size_t)a.map->h;
+    CHECK(memcmp(a.map->tiles, b.map->tiles, n) == 0);
+    CHECK(memcmp(a.map->explored, b.map->explored, n * sizeof *a.map->explored) == 0);
     game_free(&a);
     game_free(&b);
 }
@@ -71,8 +72,8 @@ static void events_are_logged(void)
     CHECK(msglog_len(&g.log) == 1);
     CHECK(msglog_get(&g.log, 0)->serial >= g.fresh_serial);
 
-    map_fill(&g.map, TILE_WALL);
-    map_set(&g.map, g.player.pos.x, g.player.pos.y, TILE_FLOOR);
+    map_fill(g.map, TILE_WALL);
+    map_set(g.map, g.player.pos.x, g.player.pos.y, TILE_FLOOR);
     game_step(&g, ACTION_MOVE_E);
     game_step(&g, ACTION_MOVE_E);
     CHECK(msglog_len(&g.log) == 2);
@@ -86,8 +87,86 @@ static void events_are_logged(void)
     game_free(&g);
 }
 
+#include "core/path.h"
+
+/* Walks to the down stairs by real moves (downhill on a distance map from the
+ * stairs) and takes them, all the way to the bottom: every level can be
+ * descended. */
+static void descend_to_the_bottom(void)
+{
+    static const Vec2 DIRS[8] = {{0, -1}, {1, -1}, {1, 0},  {1, 1},
+                                 {0, 1},  {-1, 1}, {-1, 0}, {-1, -1}};
+    for (uint64_t seed = 0; seed < 10; seed++)
+    {
+        Game g;
+        CHECK(game_init(&g, seed));
+        int *dist = malloc((size_t)g.map->w * (size_t)g.map->h * sizeof *dist);
+
+        while (g.depth < DUNGEON_DEPTH)
+        {
+            Vec2 target = g.levels[g.depth - 1].stairs_down;
+            path_distances(g.map, target, dist);
+            for (int steps = 0; !vec2_eq(g.player.pos, target) && steps < 1000; steps++)
+            {
+                int here = dist[g.player.pos.y * g.map->w + g.player.pos.x];
+                for (int k = 0; k < 8; k++)
+                {
+                    Vec2 next = vec2_add(g.player.pos, DIRS[k]);
+                    if (map_in_bounds(g.map, next.x, next.y) &&
+                        dist[next.y * g.map->w + next.x] == here - 1)
+                    {
+                        CHECK(game_step(&g, (Action)(ACTION_MOVE_N + k)));
+                        break;
+                    }
+                }
+            }
+            int depth = g.depth;
+            CHECK(game_step(&g, ACTION_DESCEND));
+            if (g.depth != depth + 1)
+                break; /* stuck: reported by the CHECK above */
+            CHECK(vec2_eq(g.player.pos, g.levels[g.depth - 1].stairs_up));
+        }
+        CHECK(g.depth == DUNGEON_DEPTH);
+        CHECK(!game_step(&g, ACTION_DESCEND)); /* the bottom has no way down */
+        free(dist);
+        game_free(&g);
+    }
+}
+
+/* Stairs use a turn, put you on the matching stairs, and levels keep what you saw. */
+static void stairs_go_both_ways_and_levels_persist(void)
+{
+    Game g;
+    game_init(&g, 21);
+    CHECK(g.depth == 1);
+    CHECK(!game_step(&g, ACTION_ASCEND)); /* depth 1: the entrance is plain floor */
+    CHECK(strcmp(msglog_get(&g.log, 0)->text, "There are no stairs up here.") == 0);
+
+    Vec2 down = g.levels[0].stairs_down;
+    g.player.pos = down;
+    int explored_before = 0;
+    for (int i = 0; i < g.map->w * g.map->h; i++)
+        explored_before += g.map->explored[i];
+
+    CHECK(game_step(&g, ACTION_DESCEND) && g.turn == 1);
+    CHECK(g.depth == 2 && g.map == &g.levels[1].map);
+    CHECK(vec2_eq(g.player.pos, g.levels[1].stairs_up));
+    CHECK(strcmp(msglog_get(&g.log, 0)->text, "You go down to depth 2.") == 0);
+    CHECK(map_is_visible(g.map, g.player.pos.x, g.player.pos.y));
+
+    CHECK(game_step(&g, ACTION_ASCEND) && g.turn == 2);
+    CHECK(g.depth == 1 && vec2_eq(g.player.pos, down));
+    int explored_after = 0;
+    for (int i = 0; i < g.map->w * g.map->h; i++)
+        explored_after += g.map->explored[i];
+    CHECK(explored_after >= explored_before && explored_before > 0);
+    game_free(&g);
+}
+
 void run_game_tests(void)
 {
+    RUN(stairs_go_both_ways_and_levels_persist);
+    RUN(descend_to_the_bottom);
     RUN(events_are_logged);
     RUN(player_starts_on_floor_and_sees_around);
     RUN(moves_respect_walls);

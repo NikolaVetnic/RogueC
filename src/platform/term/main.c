@@ -59,6 +59,8 @@ static void init_styles_8(void)
         [STYLE_FLOOR_SEEN] = {COLOR_BLUE, 0},
         [STYLE_WALL_LIT] = {COLOR_YELLOW, 0},
         [STYLE_WALL_SEEN] = {COLOR_BLUE, 0},
+        [STYLE_STAIRS_LIT] = {COLOR_CYAN, A_BOLD},
+        [STYLE_STAIRS_SEEN] = {COLOR_CYAN, 0},
         [STYLE_PLAYER] = {COLOR_YELLOW, A_BOLD},
         [STYLE_STATUS] = {COLOR_WHITE, A_REVERSE},
         [STYLE_TEXT] = {COLOR_WHITE, A_BOLD},
@@ -80,6 +82,8 @@ static void init_styles(void)
         style_attr[STYLE_PLAYER] = A_BOLD;
         style_attr[STYLE_FLOOR_SEEN] = A_DIM;
         style_attr[STYLE_WALL_SEEN] = A_DIM;
+        style_attr[STYLE_STAIRS_LIT] = A_BOLD;
+        style_attr[STYLE_STAIRS_SEEN] = A_DIM;
         style_attr[STYLE_STATUS] = A_REVERSE;
         style_attr[STYLE_TEXT_DIM] = A_DIM;
         style_attr[STYLE_HEADING] = A_BOLD;

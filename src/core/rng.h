@@ -13,6 +13,9 @@ typedef struct
 } Rng;
 
 void rng_seed(Rng *rng, uint64_t seed);
+/* Like rng_seed, on one of 2^63 independent streams: the same seed on two
+ * streams gives unrelated sequences (one stream per dungeon level). */
+void rng_seed_stream(Rng *rng, uint64_t seed, uint64_t stream);
 uint32_t rng_next(Rng *rng);
 /* Uniform in [0, n); n must be > 0. */
 uint32_t rng_below(Rng *rng, uint32_t n);

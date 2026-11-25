@@ -10,6 +10,8 @@ typedef enum
 {
     TILE_WALL = 0,
     TILE_FLOOR,
+    TILE_STAIRS_DOWN,
+    TILE_STAIRS_UP,
     TILE_COUNT
 } Tile;
 

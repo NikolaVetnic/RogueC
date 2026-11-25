@@ -31,7 +31,7 @@ static void player_shown_once_with_status_line(void)
     CHECK(find_player(cols, rows, &px, &py) == 1);
     CHECK(cells[py * cols + px].style == STYLE_PLAYER);
     CHECK(py < rows - 1);
-    CHECK(cells[(rows - 1) * cols + 1].glyph == 'S'); /* " Seed ..." */
+    CHECK(cells[(rows - 1) * cols + 1].glyph == 'D'); /* " Depth ..." */
     CHECK(cells[(rows - 1) * cols].style == STYLE_STATUS);
     game_free(&g);
 }
@@ -40,8 +40,8 @@ static void unexplored_cells_are_blank_and_seen_cells_dim(void)
 {
     Game g;
     game_init(&g, 5);
-    map_clear_visible(&g.map);
-    map_clear_explored(&g.map);
+    map_clear_visible(g.map);
+    map_clear_explored(g.map);
     render_game(&g, cells, 50, 20);
     for (int i = 2 * 50; i < 50 * 19; i++) /* below the two message lines */
         CHECK(cells[i].glyph == ' ' || cells[i].glyph == '@');
@@ -49,8 +49,8 @@ static void unexplored_cells_are_blank_and_seen_cells_dim(void)
     /* Mark the cell east of the player explored but not visible. */
     int px = -1, py = -1;
     find_player(50, 20, &px, &py);
-    map_mark_seen(&g.map, g.player.pos.x + 1, g.player.pos.y);
-    map_clear_visible(&g.map);
+    map_mark_seen(g.map, g.player.pos.x + 1, g.player.pos.y);
+    map_clear_visible(g.map);
     render_game(&g, cells, 50, 20);
     uint8_t s = cells[py * 50 + px + 1].style;
     CHECK(s == STYLE_FLOOR_SEEN || s == STYLE_WALL_SEEN);
@@ -97,6 +97,22 @@ static void messages_on_top(void)
     game_free(&g);
 }
 
+/* Stairs in view are drawn with their own glyph and style. */
+static void stairs_are_drawn(void)
+{
+    Game g;
+    game_init(&g, 5);
+    Vec2 down = g.levels[0].stairs_down; /* on open floor: the cell west is floor */
+    g.player.pos = vec2(down.x - 1, down.y);
+    game_step(&g, ACTION_WAIT); /* looks around */
+    render_game(&g, cells, 50, 20);
+    int found = 0;
+    for (int i = 0; i < 50 * 20; i++)
+        found += cells[i].glyph == '>' && cells[i].style == STYLE_STAIRS_LIT;
+    CHECK(found == 1);
+    game_free(&g);
+}
+
 /* Every style is readable: its text colour differs from its background. */
 static void palette_has_contrast(void)
 {
@@ -123,6 +139,7 @@ void run_render_tests(void)
     RUN(unexplored_cells_are_blank_and_seen_cells_dim);
     RUN(tiny_and_huge_screens_are_safe);
     RUN(messages_on_top);
+    RUN(stairs_are_drawn);
     RUN(palette_has_contrast);
     RUN(utf8_encoding);
 }

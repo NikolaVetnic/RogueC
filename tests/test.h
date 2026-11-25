@@ -36,5 +36,6 @@ void run_game_tests(void);
 void run_render_tests(void);
 void run_msglog_tests(void);
 void run_ui_tests(void);
+void run_dungeon_tests(void);
 
 #endif

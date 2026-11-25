@@ -7,8 +7,13 @@
 
 void rng_seed(Rng *rng, uint64_t seed)
 {
+    rng_seed_stream(rng, seed, RNG_STREAM);
+}
+
+void rng_seed_stream(Rng *rng, uint64_t seed, uint64_t stream)
+{
     rng->state = 0;
-    rng->inc = (RNG_STREAM << 1u) | 1u;
+    rng->inc = (stream << 1u) | 1u;
     rng_next(rng);
     rng->state += seed;
     rng_next(rng);
