@@ -1,6 +1,6 @@
 # RogueC
 
-A roguelike in C: procedurally generated caves, ray-cast line of sight with fog of war, permadeath. C practice project, being completed into a full game that also runs in the browser.
+A roguelike in C: procedurally generated caves, ray-cast line of sight with fog of war, permadeath. Plays in the terminal, in a desktop window, and in the browser (WebAssembly).
 
 ![RogueC, 2022 version](gif/line-of-sight.gif)
 
@@ -8,15 +8,20 @@ A roguelike in C: procedurally generated caves, ray-cast line of sight with fog 
 
 ## Build and play
 
+| Version | Command | Needs |
+|---|---|---|
+| Terminal | `make run` | C17 compiler, ncurses (`libncursesw` on Linux) |
+| Desktop window | `make run-gui` | raylib 6.2 (`brew install raylib`) |
+| Browser | `make serve`, then open http://localhost:8000 | Emscripten (`brew install emscripten`); the first build fetches and compiles raylib 6.2 |
+
 ```
-make          # release build: build/release/rogue
-make run      # build and play
-./build/release/rogue 42    # play a specific seed (same seed, same cave)
-make test     # unit tests with AddressSanitizer + UndefinedBehaviorSanitizer
-make help     # all targets
+./build/release/rogue 42       # play a specific seed (same seed, same cave)
+./build/release/rogue-gui 42
+make test                      # unit tests with AddressSanitizer + UndefinedBehaviorSanitizer
+make help                      # all targets
 ```
 
-Needs a C17 compiler and ncurses (`libncursesw` on Linux). Any terminal size works; the view follows the player.
+Any terminal or window size works; the view follows the player. `make web` writes a static site to `build/www/` (index.html, .js, .wasm, .data) that any web server can host.
 
 ## Controls
 
@@ -39,7 +44,10 @@ src/core/            game logic in pure C: no I/O, no globals, deterministic per
   game               game state, actions, rules
   render             game state -> grid of cells (glyph + style) for any frontend
 src/platform/term/   ncurses frontend
-tests/               unit tests of the core (no ncurses needed)
+src/platform/raylib/ raylib frontend: desktop window and browser (Emscripten)
+web/shell.html       page around the browser build
+assets/fonts/        JetBrains Mono (SIL Open Font License, see OFL.txt)
+tests/               unit tests of the core (no ncurses or raylib needed)
 ```
 
 ## How it works

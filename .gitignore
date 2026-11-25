@@ -79,3 +79,6 @@ Temporary Items
 .apdisk
 # Build output
 build/
+
+# Fetched dependencies (make deps)
+third_party/

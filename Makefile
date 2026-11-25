@@ -1,6 +1,7 @@
 # RogueC build. `make help` lists targets.
+#
+# MODE selects the build: release (default), debug (sanitizers) or web (Emscripten).
 
-CC    ?= cc
 MODE  ?= release
 OUT   := build/$(MODE)
 
@@ -8,9 +9,15 @@ WARN  := -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes \
          -Wmissing-prototypes -Wformat=2 -Werror
 
 ifeq ($(MODE),debug)
+  CC    ?= cc
   OPT   := -g -O0 -fsanitize=address,undefined -fno-omit-frame-pointer
   LDOPT := -fsanitize=address,undefined
+else ifeq ($(MODE),web)
+  CC    := emcc
+  OPT   := -Os
+  LDOPT :=
 else
+  CC    ?= cc
   OPT   := -O2
   LDOPT :=
 endif
@@ -23,27 +30,76 @@ endif
 
 CFLAGS := -std=c17 $(WARN) $(OPT) -MMD -MP -Isrc
 
-# core: game logic, no I/O. term: ncurses frontend. tests link the core only.
+# core: game logic, no I/O. term: ncurses frontend. gui: raylib frontend
+# (desktop and web). Tests link the core only.
 CORE_OBJ := $(patsubst %.c,$(OUT)/%.o,$(wildcard src/core/*.c))
 TERM_OBJ := $(patsubst %.c,$(OUT)/%.o,$(wildcard src/platform/term/*.c))
+GUI_OBJ  := $(patsubst %.c,$(OUT)/%.o,$(wildcard src/platform/raylib/*.c))
 TEST_OBJ := $(patsubst %.c,$(OUT)/%.o,$(wildcard tests/*.c))
 
-.PHONY: all run debug test leaks format clean help
+# raylib: the installed one (pkg-config) for desktop; for the web, the same
+# version built from source with Emscripten (`make deps`).
+RAYLIB_VERSION := 6.2
+RAYLIB_DIR     := third_party/raylib
+RAYLIB_WEB_LIB := build/raylib-web/libraylib.web.a
 
-all: $(OUT)/rogue                     ## build the game (release)
+ifeq ($(MODE),web)
+  RAYLIB_INC  := -isystem $(RAYLIB_DIR)/src
+  RAYLIB_LIBS := $(RAYLIB_WEB_LIB)
+else
+  # -isystem: raylib's header isn't held to this project's warning flags
+  RAYLIB_INC  := $(patsubst -I%,-isystem %,$(shell pkg-config --cflags raylib 2>/dev/null))
+  RAYLIB_LIBS := $(shell pkg-config --libs raylib 2>/dev/null) -lm
+endif
+$(GUI_OBJ): CFLAGS += $(RAYLIB_INC)
+
+WEB_SITE  := build/www
+WEB_FLAGS := -sUSE_GLFW=3 -sALLOW_MEMORY_GROWTH=1 \
+             --preload-file assets/fonts@assets/fonts --shell-file web/shell.html
+
+.PHONY: all run gui run-gui web serve deps debug test leaks format clean distclean help
+
+all: $(OUT)/rogue                     ## build the terminal game (release)
 
 $(OUT)/rogue: $(CORE_OBJ) $(TERM_OBJ)
 	$(CC) $(LDOPT) -o $@ $^ $(CURSES)
 
+$(OUT)/rogue-gui: $(CORE_OBJ) $(GUI_OBJ)
+	$(CC) $(LDOPT) -o $@ $^ $(RAYLIB_LIBS)
+
 $(OUT)/test_runner: $(CORE_OBJ) $(TEST_OBJ)
 	$(CC) $(LDOPT) -o $@ $^
+
+$(WEB_SITE)/index.html: $(CORE_OBJ) $(GUI_OBJ) $(RAYLIB_WEB_LIB) web/shell.html $(wildcard assets/fonts/*)
+	@mkdir -p $(dir $@)
+	$(CC) -o $@ $(CORE_OBJ) $(GUI_OBJ) $(RAYLIB_WEB_LIB) $(OPT) $(WEB_FLAGS)
 
 $(OUT)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-run: all                              ## build and play
+$(RAYLIB_DIR)/src/raylib.h:
+	git clone --depth 1 --branch $(RAYLIB_VERSION) https://github.com/raysan5/raylib.git $(RAYLIB_DIR)
+
+$(RAYLIB_WEB_LIB): | $(RAYLIB_DIR)/src/raylib.h
+	@mkdir -p $(dir $@)
+	$(MAKE) -C $(RAYLIB_DIR)/src PLATFORM=PLATFORM_WEB RAYLIB_RELEASE_PATH=$(abspath $(dir $@))
+
+run: all                              ## build and play in the terminal
 	./$(OUT)/rogue
+
+gui: $(OUT)/rogue-gui                 ## build the desktop window version (needs raylib installed)
+
+run-gui: gui                          ## build and play in a window
+	./$(OUT)/rogue-gui
+
+deps: $(RAYLIB_WEB_LIB)               ## fetch raylib source and build it for the web (needs emcc)
+
+web:                                  ## build the browser version into build/www (needs emcc)
+	$(MAKE) MODE=web $(WEB_SITE)/index.html
+
+serve: web                            ## build the browser version and serve it on localhost:8000
+	python3 -m http.server 8000 --directory $(WEB_SITE)
 
 debug:                                ## build with ASan + UBSan
 	$(MAKE) MODE=debug
@@ -59,10 +115,13 @@ leaks:                                ## macOS: run tests under `leaks` (ASan fi
 format:                               ## format all sources with clang-format
 	clang-format -i $(wildcard src/*/*.[ch] src/*/*/*.[ch] tests/*.[ch])
 
-clean:                                ## remove build output
+clean:                                ## remove build output (keeps fetched raylib)
 	rm -rf build
 
-help:
-	@grep -hE '^[a-z]+:.*##' Makefile | awk -F':.*## ' '{ printf "  make %-8s %s\n", $$1, $$2 }'
+distclean: clean                      ## also remove fetched dependencies
+	rm -rf third_party
 
--include $(CORE_OBJ:.o=.d) $(TERM_OBJ:.o=.d) $(TEST_OBJ:.o=.d)
+help:
+	@grep -hE '^[a-z-]+:.*##' Makefile | awk -F':.*## ' '{ printf "  make %-10s %s\n", $$1, $$2 }'
+
+-include $(CORE_OBJ:.o=.d) $(TERM_OBJ:.o=.d) $(GUI_OBJ:.o=.d) $(TEST_OBJ:.o=.d)

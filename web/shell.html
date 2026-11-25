@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RogueC</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #0c0c10; }
+    /* !important: beats the inline size the runtime sets; the game reads this size */
+    canvas { display: block; outline: none; width: 100vw !important; height: 100vh !important; }
+    #status {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      color: #aaa; font: 16px ui-monospace, monospace; pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="status">Loading…</div>
+  <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
+  <script>
+    var Module = {
+      canvas: document.getElementById('canvas'),
+      setStatus: function (text) {
+        var s = document.getElementById('status');
+        s.textContent = text;
+        s.style.display = text ? 'flex' : 'none';
+      },
+      onRuntimeInitialized: function () {
+        Module.setStatus('');
+        Module.canvas.focus();
+      }
+    };
+    // Keys the game uses must not scroll the page.
+    window.addEventListener('keydown', function (e) {
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(e.key))
+        e.preventDefault();
+    });
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>
