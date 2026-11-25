@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include "core/map.h"
+#include "core/msglog.h"
 #include "core/rng.h"
 #include "core/vec2.h"
 
@@ -41,6 +42,8 @@ typedef struct
     int turn;
     int fov_radius;
     bool running;
+    MsgLog log;
+    int fresh_serial; /* messages from this serial on came after the last action */
 } Game;
 
 /* Generates the first level from `seed`. Returns false if out of memory. */

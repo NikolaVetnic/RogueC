@@ -63,8 +63,32 @@ static void games_are_deterministic(void)
     game_free(&b);
 }
 
+/* Messages: a welcome, a bump into rock; any action makes earlier ones old. */
+static void events_are_logged(void)
+{
+    Game g;
+    game_init(&g, 3);
+    CHECK(msglog_len(&g.log) == 1);
+    CHECK(msglog_get(&g.log, 0)->serial >= g.fresh_serial);
+
+    map_fill(&g.map, TILE_WALL);
+    map_set(&g.map, g.player.pos.x, g.player.pos.y, TILE_FLOOR);
+    game_step(&g, ACTION_MOVE_E);
+    game_step(&g, ACTION_MOVE_E);
+    CHECK(msglog_len(&g.log) == 2);
+    const Message *bump = msglog_get(&g.log, 0);
+    CHECK(strcmp(bump->text, "Rock blocks the way.") == 0 && bump->count == 2);
+    CHECK(bump->serial >= g.fresh_serial);                 /* fresh */
+    CHECK(msglog_get(&g.log, 1)->serial < g.fresh_serial); /* the welcome is old */
+
+    game_step(&g, ACTION_WAIT);
+    CHECK(bump->serial < g.fresh_serial);
+    game_free(&g);
+}
+
 void run_game_tests(void)
 {
+    RUN(events_are_logged);
     RUN(player_starts_on_floor_and_sees_around);
     RUN(moves_respect_walls);
     RUN(games_are_deterministic);

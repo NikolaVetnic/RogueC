@@ -12,6 +12,8 @@ int main(void)
     run_fov_tests();
     run_game_tests();
     run_render_tests();
+    run_msglog_tests();
+    run_ui_tests();
 
     printf("\n%d checks, %d failed\n", test_checks, test_failures);
     return test_failures == 0 ? 0 : 1;

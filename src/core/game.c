@@ -44,6 +44,8 @@ bool game_init(Game *g, uint64_t seed)
     g->player =
         (Player){.pos = random_floor(&g->map, &g->rng), .hp = PLAYER_HP, .hp_max = PLAYER_HP};
     fov_compute(&g->map, g->player.pos, g->fov_radius);
+    msglog_clear(&g->log);
+    msglog_add(&g->log, g->turn, "You enter the caves. Press ? for help.");
     return true;
 }
 
@@ -56,7 +58,10 @@ static bool try_move(Game *g, Vec2 dir)
 {
     Vec2 to = vec2_add(g->player.pos, dir);
     if (!map_walkable(&g->map, to.x, to.y))
+    {
+        msglog_add(&g->log, g->turn, "Rock blocks the way.");
         return false;
+    }
     g->player.pos = to;
     return true;
 }
@@ -64,6 +69,8 @@ static bool try_move(Game *g, Vec2 dir)
 bool game_step(Game *g, Action a)
 {
     bool used_turn = false;
+    if (a != ACTION_NONE)
+        g->fresh_serial = msglog_next_serial(&g->log); /* earlier messages are now old */
 
     if (a >= ACTION_MOVE_N && a <= ACTION_MOVE_NW)
         used_turn = try_move(g, MOVE_DIR[a - ACTION_MOVE_N]);

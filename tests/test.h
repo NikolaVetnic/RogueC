@@ -34,5 +34,7 @@ void run_gen_cave_tests(void);
 void run_fov_tests(void);
 void run_game_tests(void);
 void run_render_tests(void);
+void run_msglog_tests(void);
+void run_ui_tests(void);
 
 #endif

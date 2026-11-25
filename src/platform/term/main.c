@@ -7,51 +7,121 @@
 
 #include "core/game.h"
 #include "core/render.h"
+#include "core/ui.h"
 
 /* ncurses attributes for each Style, filled by init_styles. */
 static attr_t style_attr[STYLE_COUNT];
 
-static void init_styles(void)
+/* Nearest colour of the xterm 256-colour palette: the 6x6x6 cube (16-231) or
+ * the grey ramp (232-255). */
+static short xterm_color(Rgb c)
 {
-    style_attr[STYLE_PLAYER] = A_BOLD;
-    style_attr[STYLE_FLOOR_SEEN] = A_DIM;
-    style_attr[STYLE_WALL_SEEN] = A_DIM;
-    style_attr[STYLE_STATUS] = A_REVERSE;
+    static const int LEVEL[6] = {0, 95, 135, 175, 215, 255};
+    int idx[3], v[3] = {c.r, c.g, c.b};
+    long cube_dist = 0;
+    for (int i = 0; i < 3; i++)
+    {
+        idx[i] = 0;
+        for (int l = 1; l < 6; l++)
+            if (abs(LEVEL[l] - v[i]) < abs(LEVEL[idx[i]] - v[i]))
+                idx[i] = l;
+        long d = LEVEL[idx[i]] - v[i];
+        cube_dist += d * d;
+    }
 
-    if (!has_colors())
-        return;
+    int grey = ((c.r + c.g + c.b) / 3 - 8 + 5) / 10; /* ramp: 8, 18, ..., 238 */
+    if (grey < 0)
+        grey = 0;
+    if (grey > 23)
+        grey = 23;
+    long grey_dist = 0;
+    for (int i = 0; i < 3; i++)
+    {
+        long d = 8 + 10 * grey - v[i];
+        grey_dist += d * d;
+    }
 
-    start_color();
-    use_default_colors();
-    short seen = COLORS >= 16 ? 8 : COLOR_BLUE; /* grey if available */
-
-    init_pair(1, COLOR_WHITE, -1);
-    init_pair(2, seen, -1);
-    init_pair(3, COLOR_YELLOW, -1);
-
-    style_attr[STYLE_FLOOR_LIT] = COLOR_PAIR(1);
-    style_attr[STYLE_WALL_LIT] = COLOR_PAIR(1);
-    style_attr[STYLE_FLOOR_SEEN] = COLOR_PAIR(2);
-    style_attr[STYLE_WALL_SEEN] = COLOR_PAIR(2);
-    style_attr[STYLE_PLAYER] = COLOR_PAIR(3) | A_BOLD;
+    if (grey_dist < cube_dist)
+        return (short)(232 + grey);
+    return (short)(16 + 36 * idx[0] + 6 * idx[1] + idx[2]);
 }
 
-static Action key_to_action(int key)
+/* Fewer than 256 colours: a rough version of the palette. */
+static void init_styles_8(void)
+{
+    static const struct
+    {
+        short fg;
+        attr_t attr;
+    } BASIC[STYLE_COUNT] = {
+        [STYLE_DEFAULT] = {COLOR_WHITE, 0},
+        [STYLE_FLOOR_LIT] = {COLOR_YELLOW, 0},
+        [STYLE_FLOOR_SEEN] = {COLOR_BLUE, 0},
+        [STYLE_WALL_LIT] = {COLOR_YELLOW, 0},
+        [STYLE_WALL_SEEN] = {COLOR_BLUE, 0},
+        [STYLE_PLAYER] = {COLOR_YELLOW, A_BOLD},
+        [STYLE_STATUS] = {COLOR_WHITE, A_REVERSE},
+        [STYLE_TEXT] = {COLOR_WHITE, A_BOLD},
+        [STYLE_TEXT_DIM] = {COLOR_WHITE, A_DIM},
+        [STYLE_HEADING] = {COLOR_YELLOW, A_BOLD},
+        [STYLE_KEY] = {COLOR_CYAN, 0},
+    };
+    for (int s = 0; s < STYLE_COUNT; s++)
+    {
+        init_pair((short)(s + 1), BASIC[s].fg, -1);
+        style_attr[s] = COLOR_PAIR(s + 1) | BASIC[s].attr;
+    }
+}
+
+static void init_styles(void)
+{
+    if (!has_colors()) /* monochrome: brightness only */
+    {
+        style_attr[STYLE_PLAYER] = A_BOLD;
+        style_attr[STYLE_FLOOR_SEEN] = A_DIM;
+        style_attr[STYLE_WALL_SEEN] = A_DIM;
+        style_attr[STYLE_STATUS] = A_REVERSE;
+        style_attr[STYLE_TEXT_DIM] = A_DIM;
+        style_attr[STYLE_HEADING] = A_BOLD;
+        return;
+    }
+
+    start_color();
+    use_default_colors(); /* -1: the terminal's own background */
+    if (COLORS < 256 || COLOR_PAIRS <= STYLE_COUNT)
+    {
+        init_styles_8();
+        return;
+    }
+
+    for (int s = 0; s < STYLE_COUNT; s++)
+    {
+        const StyleColor *c = &STYLE_COLORS[s];
+        init_pair((short)(s + 1), xterm_color(c->fg), c->has_bg ? xterm_color(c->bg) : -1);
+        style_attr[s] = COLOR_PAIR(s + 1);
+    }
+    style_attr[STYLE_PLAYER] |= A_BOLD;
+    style_attr[STYLE_HEADING] |= A_BOLD;
+}
+
+/* ncurses key -> ui key; 0 for no key press. */
+static int ui_key_for(int key)
 {
     // clang-format off
     switch (key)
     {
-    case 'w': case 'W': case 'k': case '8': case KEY_UP:    return ACTION_MOVE_N;
-    case 's': case 'S': case 'j': case '2': case KEY_DOWN:  return ACTION_MOVE_S;
-    case 'a': case 'A': case 'h': case '4': case KEY_LEFT:  return ACTION_MOVE_W;
-    case 'd': case 'D': case 'l': case '6': case KEY_RIGHT: return ACTION_MOVE_E;
-    case 'y': case '7': case KEY_HOME:  return ACTION_MOVE_NW;
-    case 'u': case '9': case KEY_PPAGE: return ACTION_MOVE_NE;
-    case 'b': case '1': case KEY_END:   return ACTION_MOVE_SW;
-    case 'n': case '3': case KEY_NPAGE: return ACTION_MOVE_SE;
-    case '.': case '5': case KEY_B2:    return ACTION_WAIT;
-    case 'q': case 'Q':                 return ACTION_QUIT;
-    default:                            return ACTION_NONE;
+    case ERR: case KEY_RESIZE:        return 0;
+    case KEY_UP:                      return UI_KEY_UP;
+    case KEY_DOWN:                    return UI_KEY_DOWN;
+    case KEY_LEFT:                    return UI_KEY_LEFT;
+    case KEY_RIGHT:                   return UI_KEY_RIGHT;
+    case KEY_HOME: case KEY_A1:       return UI_KEY_HOME;
+    case KEY_END: case KEY_C1:        return UI_KEY_END;
+    case KEY_PPAGE: case KEY_A3:      return UI_KEY_PAGE_UP;
+    case KEY_NPAGE: case KEY_C3:      return UI_KEY_PAGE_DOWN;
+    case KEY_B2:                      return UI_KEY_CENTER;
+    case KEY_ENTER:                   return '\n';
+    default:                          return key >= KEY_MIN ? UI_KEY_OTHER : key;
     }
     // clang-format on
 }
@@ -84,12 +154,15 @@ int main(int argc, char **argv)
         fprintf(stderr, "Out of memory while generating the level.\n");
         return EXIT_FAILURE;
     }
+    Ui ui;
+    ui_init(&ui);
 
     setlocale(LC_ALL, ""); /* UTF-8 output for the wall glyph */
     initscr();
     cbreak();
     noecho();
     keypad(stdscr, TRUE);
+    set_escdelay(25); /* Esc alone arrives after this many ms, not 1 s */
     curs_set(0);
     init_styles();
 
@@ -109,9 +182,11 @@ int main(int argc, char **argv)
             clear();
         }
 
-        render_game(&game, cells, cols, rows);
+        ui_render(&ui, &game, cells, cols, rows);
         draw(cells, cols, rows);
-        game_step(&game, key_to_action(getch()));
+        int key = ui_key_for(getch());
+        if (key != 0)
+            ui_key(&ui, &game, key);
     }
 
     endwin();

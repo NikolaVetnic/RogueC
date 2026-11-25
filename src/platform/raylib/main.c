@@ -16,30 +16,19 @@
 
 #include "core/game.h"
 #include "core/render.h"
+#include "core/ui.h"
 
 #define FONT_FILE "assets/fonts/JetBrainsMono-Regular.ttf"
 /* raylib's font size is the line height (ascent + descent), in logical pixels;
  * it is also the cell height. Letters are about 3/4 of it. */
 #define FONT_SIZE 22
 #define START_COLS 100
-#define START_ROWS 43 /* map height + status line */
-
-#define GLYPH_FULL_BLOCK 0x2588u
-
-static const Color BACKGROUND = {12, 12, 16, 255};
-
-/* Foreground per Style; the status line also gets a background. */
-static const Color STYLE_FG[STYLE_COUNT] = {
-    [STYLE_DEFAULT] = {200, 200, 200, 255}, [STYLE_FLOOR_LIT] = {170, 170, 160, 255},
-    [STYLE_FLOOR_SEEN] = {60, 66, 84, 255}, [STYLE_WALL_LIT] = {150, 140, 125, 255},
-    [STYLE_WALL_SEEN] = {44, 48, 62, 255},  [STYLE_PLAYER] = {255, 210, 70, 255},
-    [STYLE_STATUS] = {20, 20, 24, 255},
-};
-static const Color STATUS_BG = {170, 170, 160, 255};
+#define START_ROWS 45 /* messages + map height + status line */
 
 typedef struct
 {
     Game game;
+    Ui ui;
     Font font;
     float scale;     /* drawing units per logical pixel: devicePixelRatio on the web, else 1 */
     float font_size; /* FONT_SIZE * scale */
@@ -61,59 +50,61 @@ typedef struct
 
 /* ---- input ---------------------------------------------------------------- */
 
-static Action char_to_action(int ch)
-{
-    // clang-format off
-    switch (ch)
-    {
-    case 'w': case 'W': case 'k': case '8': return ACTION_MOVE_N;
-    case 's': case 'S': case 'j': case '2': return ACTION_MOVE_S;
-    case 'a': case 'A': case 'h': case '4': return ACTION_MOVE_W;
-    case 'd': case 'D': case 'l': case '6': return ACTION_MOVE_E;
-    case 'y': case '7': return ACTION_MOVE_NW;
-    case 'u': case '9': return ACTION_MOVE_NE;
-    case 'b': case '1': return ACTION_MOVE_SW;
-    case 'n': case '3': return ACTION_MOVE_SE;
-    case '.': case '5': return ACTION_WAIT;
-    case 'q': case 'Q': return ACTION_QUIT;
-    default:            return ACTION_NONE;
-    }
-    // clang-format on
-}
-
-/* Keys that type no character. Letters, digits and the numpad arrive as
- * characters (GetCharPressed), including the operating system's key repeat. */
+/* Keys that type no character, as ui keys. Letters, digits and the numpad
+ * arrive as characters (GetCharPressed), including the system's key repeat. */
 static const struct
 {
     int key;
-    Action action;
-} KEY_ACTIONS[] = {
-    {KEY_UP, ACTION_MOVE_N},    {KEY_DOWN, ACTION_MOVE_S},       {KEY_LEFT, ACTION_MOVE_W},
-    {KEY_RIGHT, ACTION_MOVE_E}, {KEY_HOME, ACTION_MOVE_NW},      {KEY_PAGE_UP, ACTION_MOVE_NE},
-    {KEY_END, ACTION_MOVE_SW},  {KEY_PAGE_DOWN, ACTION_MOVE_SE},
+    int ui_key;
+} SPECIAL_KEYS[] = {
+    {KEY_UP, UI_KEY_UP},
+    {KEY_DOWN, UI_KEY_DOWN},
+    {KEY_LEFT, UI_KEY_LEFT},
+    {KEY_RIGHT, UI_KEY_RIGHT},
+    {KEY_HOME, UI_KEY_HOME},
+    {KEY_END, UI_KEY_END},
+    {KEY_PAGE_UP, UI_KEY_PAGE_UP},
+    {KEY_PAGE_DOWN, UI_KEY_PAGE_DOWN},
+    {KEY_ESCAPE, 27},
+    {KEY_ENTER, '\n'},
+    {KEY_KP_ENTER, '\n'},
 };
 
-static void apply(App *app, Action a)
+static void press(App *app, int key)
 {
-    game_step(&app->game, a);
+    ui_key(&app->ui, &app->game, key);
     if (!app->game.running)
         app->quit = true;
+}
+
+static int special_key(int key)
+{
+    for (size_t i = 0; i < sizeof SPECIAL_KEYS / sizeof SPECIAL_KEYS[0]; i++)
+        if (SPECIAL_KEYS[i].key == key)
+            return SPECIAL_KEYS[i].ui_key;
+    return 0;
 }
 
 static void handle_input(App *app)
 {
     for (int ch = GetCharPressed(); ch != 0; ch = GetCharPressed())
-        apply(app, char_to_action(ch));
+        press(app, ch);
 
-    for (size_t i = 0; i < sizeof KEY_ACTIONS / sizeof KEY_ACTIONS[0]; i++)
-        if (IsKeyPressed(KEY_ACTIONS[i].key) || IsKeyPressedRepeat(KEY_ACTIONS[i].key))
-            apply(app, KEY_ACTIONS[i].action);
+    /* Presses from raylib's queue: IsKeyPressed compares key states between
+     * frames and misses a key pressed and released within one frame. */
+    for (int key = GetKeyPressed(); key != 0; key = GetKeyPressed())
+        if (special_key(key))
+            press(app, special_key(key));
+
+    for (size_t i = 0; i < sizeof SPECIAL_KEYS / sizeof SPECIAL_KEYS[0]; i++)
+        if (IsKeyPressedRepeat(SPECIAL_KEYS[i].key))
+            press(app, SPECIAL_KEYS[i].ui_key);
 }
 
 /* ---- drawing -------------------------------------------------------------- */
 
-/* Loads printable ASCII at `pixel_size`; the full block is drawn as a
- * rectangle, not a glyph. Falls back to raylib's built-in font. */
+/* Loads printable ASCII at `pixel_size`; the wall glyph (full block) is drawn
+ * as a rectangle. Falls back to raylib's built-in font. */
 static Font load_font(int pixel_size)
 {
     static int codepoints[95];
@@ -174,6 +165,11 @@ static bool fit_grid(App *app)
     return true;
 }
 
+static Color color(Rgb c)
+{
+    return (Color){c.r, c.g, c.b, 255};
+}
+
 static void draw(const App *app)
 {
     /* Centre the grid in the window. */
@@ -182,19 +178,20 @@ static void draw(const App *app)
     float text_dy = ((float)app->cell_h - app->font_size) / 2.0f;
 
     BeginDrawing();
-    ClearBackground(BACKGROUND);
+    ClearBackground(color(PALETTE_BACKGROUND));
 
     for (int y = 0; y < app->rows; y++)
         for (int x = 0; x < app->cols; x++)
         {
             const Cell *c = &app->cells[y * app->cols + x];
             int px = ox + x * app->cell_w, py = oy + y * app->cell_h;
-            Color fg = STYLE_FG[c->style];
+            const StyleColor *sc = &STYLE_COLORS[c->style];
+            Color fg = color(sc->fg);
 
-            if (c->style == STYLE_STATUS)
-                DrawRectangle(px, py, app->cell_w, app->cell_h, STATUS_BG);
+            if (sc->has_bg)
+                DrawRectangle(px, py, app->cell_w, app->cell_h, color(sc->bg));
 
-            if (c->glyph == GLYPH_FULL_BLOCK) /* exact cell, no gaps between walls */
+            if (c->glyph == GLYPH_WALL) /* exact cell, no gaps between walls */
                 DrawRectangle(px, py, app->cell_w, app->cell_h, fg);
             else if (c->glyph != ' ')
                 DrawTextCodepoint(app->font, (int)c->glyph,
@@ -238,6 +235,7 @@ static void frame(void *arg)
     {
         game_free(&app->game);
         app->quit = !game_init(&app->game, (uint64_t)time(NULL));
+        ui_init(&app->ui);
     }
     if (app->quit || !fit_grid(app))
     {
@@ -251,7 +249,7 @@ static void frame(void *arg)
         return;
     }
 #endif
-    render_game(&app->game, app->cells, app->cols, app->rows);
+    ui_render(&app->ui, &app->game, app->cells, app->cols, app->rows);
     draw(app);
 }
 
@@ -299,6 +297,7 @@ int main(int argc, char **argv)
 #else
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_WINDOW_HIGHDPI | FLAG_VSYNC_HINT);
 #endif
+    ui_init(&app.ui);
     InitWindow(800, 600, "RogueC");
     SetExitKey(KEY_NULL); /* Esc doesn't close the game */
 
@@ -307,13 +306,20 @@ int main(int argc, char **argv)
 #ifdef __EMSCRIPTEN__
     emscripten_set_main_loop_arg(frame, &app, 0, true); /* never returns */
 #else
-    SetWindowSize(START_COLS * app.cell_w, START_ROWS * app.cell_h);
+    /* START_COLS x START_ROWS cells, or less on a small screen */
+    int monitor = GetCurrentMonitor();
+    int cols = START_COLS, rows = START_ROWS;
+    if (cols * app.cell_w > GetMonitorWidth(monitor) * 9 / 10)
+        cols = GetMonitorWidth(monitor) * 9 / 10 / app.cell_w;
+    if (rows * app.cell_h > GetMonitorHeight(monitor) * 85 / 100)
+        rows = GetMonitorHeight(monitor) * 85 / 100 / app.cell_h;
+    SetWindowSize(cols * app.cell_w, rows * app.cell_h);
     SetWindowMinSize(20 * app.cell_w, 8 * app.cell_h);
 
     if (opt.screenshot)
     {
         for (const char *k = opt.keys; k && *k; k++)
-            apply(&app, char_to_action(*k));
+            press(&app, *k);
         for (int i = 0; i < 3; i++) /* a few frames so both buffers hold the image */
             frame(&app);
         save_screenshot(opt.screenshot);
