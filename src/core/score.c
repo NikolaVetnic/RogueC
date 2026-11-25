@@ -29,8 +29,6 @@ Score score_of(const Game *g)
         snprintf(s.cause, sizeof s.cause, "quit on depth %d", g->depth);
     else if (g->death == DEATH_STARVATION)
         snprintf(s.cause, sizeof s.cause, "starved on depth %d", g->depth);
-    else if (g->death == DEATH_POISON)
-        snprintf(s.cause, sizeof s.cause, "poisoned on depth %d", g->depth);
     else
         snprintf(s.cause, sizeof s.cause, "killed by %s %s on depth %d", monster_article(g->killer),
                  MONSTERS[g->killer].name, g->depth);

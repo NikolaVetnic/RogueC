@@ -118,7 +118,7 @@ static void monster_kills_the_player(void)
     Game g;
     Ui ui;
     open_game(&g);
-    ui_init(&ui, NULL);
+    ui_init(&ui, NULL, NULL);
     g.player.hp = 1;
     add(&g, MON_TROLL, vec2(51, 20), true);
     for (int i = 0; i < 100 && !g.dead; i++)
@@ -200,7 +200,7 @@ static void real_time_runs_on_the_clock(void)
     Game g;
     Ui ui;
     open_game(&g);
-    ui_init(&ui, NULL);
+    ui_init(&ui, NULL, NULL);
     ui_key(&ui, &g, 'T');
     CHECK(g.realtime);
     int turn = g.turn;
@@ -241,7 +241,7 @@ static void visible_monsters_are_drawn(void)
     add(&g, MON_ORC, vec2(53, 20), false);
     add(&g, MON_OGRE, vec2(80, 20), false); /* out of view */
     game_step(&g, ACTION_WAIT);
-    render_game(&g, cells, COLS, ROWS);
+    render_game(&g, cells, COLS, ROWS, (MapView){.log_lines = 2});
     int orcs = 0, ogres = 0;
     for (int i = 0; i < COLS * ROWS; i++)
     {

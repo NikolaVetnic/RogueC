@@ -63,10 +63,18 @@ extern const StyleColor STYLE_COLORS[STYLE_COUNT];
 #define GLYPH_STAIRS_DOWN '>'
 #define GLYPH_STAIRS_UP '<'
 
+/* How the map screen looks. */
+typedef struct
+{
+    int log_lines; /* messages above the map */
+    bool can_exit; /* the key hint says "q save & quit", else "q save" */
+} MapView;
+
 /* Map screen: fills cells[rows * cols] (row-major) with the map centred on the
- * player, the two newest messages on top when there are at least 10 rows, and
- * a status line on the last row when there are at least two. */
-void render_game(const Game *g, Cell *cells, int cols, int rows);
+ * player, the view.log_lines newest messages on top when there are at least
+ * 8 + log_lines rows, and a status line on the last row when there are at
+ * least two. */
+void render_game(const Game *g, Cell *cells, int cols, int rows, MapView view);
 
 /* The style a monster kind is drawn in. */
 Style render_monster_style(MonsterKind kind);

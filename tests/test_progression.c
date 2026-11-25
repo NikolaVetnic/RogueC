@@ -80,7 +80,7 @@ static void carrying_the_goal_out_wins(void)
     Ui ui;
     ScoreTable table = {0};
     open_game(&g);
-    ui_init(&ui, &table);
+    ui_init(&ui, &table, NULL);
 
     Vec2 exit = g.levels[0].stairs_up;
     map_set(g.map, exit.x, exit.y, TILE_STAIRS_UP);
@@ -128,7 +128,7 @@ static void death_scores_once(void)
     Ui ui;
     ScoreTable table = {0};
     open_game(&g);
-    ui_init(&ui, &table);
+    ui_init(&ui, &table, NULL);
     g.player.gold = 123;
     g.player.xp = 7;
     g.player.hp = 1;

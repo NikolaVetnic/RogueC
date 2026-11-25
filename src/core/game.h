@@ -30,8 +30,16 @@ typedef enum
     ACTION_DESCEND,
     ACTION_ASCEND,
     ACTION_PICK_UP,
-    ACTION_USE,  /* an item in the pack: eat, drink, read, wield, wear or take off */
-    ACTION_DROP, /* an item in the pack */
+    ACTION_USE,   /* an item in the pack: eat, drink, read, wield, wear or take off */
+    ACTION_DROP,  /* an item in the pack */
+    ACTION_RUN_N, /* run: move until something interesting happens */
+    ACTION_RUN_NE,
+    ACTION_RUN_E,
+    ACTION_RUN_SE,
+    ACTION_RUN_S,
+    ACTION_RUN_SW,
+    ACTION_RUN_W,
+    ACTION_RUN_NW,
     ACTION_QUIT,
 } Action;
 
@@ -58,7 +66,6 @@ typedef enum
 {
     DEATH_MONSTER,
     DEATH_STARVATION,
-    DEATH_POISON,
 } DeathCause;
 
 typedef struct
@@ -80,15 +87,28 @@ typedef struct
 
 enum
 {
-    DUNGEON_DEPTH = 10,     /* levels */
+    DUNGEON_DEPTH = 10, /* levels */
+    MAP_WIDTH = 100,    /* every level's size */
+    MAP_HEIGHT = 42,
     ACT_COST = 100,         /* energy an action takes */
     REGEN_TURNS = 10,       /* the player heals 1 HP this often */
     REST_MAX = 500,         /* turns one rest can last */
     MAX_LEVEL = 12,         /* experience levels */
-    LEVEL_HP = 5,           /* max HP gained per level */
+    LEVEL_HP = 6,           /* max HP gained per level */
     WANDER_ODDS = 300,      /* default Game.wander_odds */
     GOAL_WANDER_ODDS = 100, /* ... once the goal is taken: the dungeon stirs */
+    RUN_MAX = 200,          /* steps one run can last */
 };
+
+/* A run in progress (not saved). */
+typedef struct
+{
+    bool active;
+    int dir;   /* 0-7, clockwise from north */
+    int steps; /* taken so far */
+    bool room; /* the last step ended in the open, not in a corridor */
+    int sides; /* in the open: which cells beside the path were floor */
+} Run;
 
 /* Owns its levels: free with game_free. Copying a Game shares them. */
 typedef struct
@@ -113,6 +133,7 @@ typedef struct
     ItemLore lore;      /* item looks and what's identified */
     MsgLog log;
     int fresh_serial; /* messages from this serial on came after the last action */
+    Run run;
 } Game;
 
 /* Generates the dungeon from `seed` and puts the player at the entrance of
@@ -136,6 +157,13 @@ bool game_has_goal(const Game *g);
 /* One tick of the world: monsters act, the player gains energy and heals. */
 void game_tick(Game *g);
 void game_set_realtime(Game *g, bool on);
+/* A run is under way. Turn-based runs finish inside game_step; in real time
+ * call game_run_continue whenever the player is ready. */
+bool game_run_active(const Game *g);
+/* Real time: the run's next step, if the player is ready. */
+void game_run_continue(Game *g);
+/* Ends a run (a key was pressed). */
+void game_run_stop(Game *g);
 Level *game_level(Game *g);
 /* The player's stats with gear and effects. */
 Stats game_player_stats(const Game *g);

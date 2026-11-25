@@ -9,8 +9,6 @@
 
 enum
 {
-    MAP_WIDTH = 100,
-    MAP_HEIGHT = 42,
     FOV_RADIUS = 10,
     WANDER_SPAWN_DIST = 15, /* ... at least this many steps away, out of view */
 };
@@ -30,7 +28,7 @@ Level *game_level(Game *g)
 }
 
 /* Experience for each level: 1 needs 0, 2 needs 10, ... */
-static const int XP_NEEDED[MAX_LEVEL] = {0, 10, 25, 45, 75, 120, 180, 260, 370, 520, 720, 1000};
+static const int XP_NEEDED[MAX_LEVEL] = {0, 8, 20, 35, 55, 85, 125, 175, 240, 320, 420, 550};
 
 int game_xp_needed(int level)
 {
@@ -464,6 +462,125 @@ static bool rest(Game *g)
     return true;
 }
 
+/* ---- running ---------------------------------------------------------------- */
+
+/* In a corridor: no 2x2 block of open floor includes `at`. */
+static bool in_corridor(const Map *m, Vec2 at)
+{
+    for (int dy = -1; dy <= 0; dy++)
+        for (int dx = -1; dx <= 0; dx++)
+            if (map_walkable(m, at.x + dx, at.y + dy) &&
+                map_walkable(m, at.x + dx + 1, at.y + dy) &&
+                map_walkable(m, at.x + dx, at.y + dy + 1) &&
+                map_walkable(m, at.x + dx + 1, at.y + dy + 1))
+                return false;
+    return true;
+}
+
+static bool open_towards(const Map *m, Vec2 at, int dir)
+{
+    Vec2 to = vec2_add(at, MOVE_DIR[dir]);
+    return map_walkable(m, to.x, to.y);
+}
+
+/* In the open, running straight: whether the cells to the left and right are
+ * floor. A change means a doorway or the end of a wall. */
+static int run_sides(const Map *m, Vec2 at, int dir)
+{
+    return (open_towards(m, at, (dir + 6) % 8) ? 1 : 0) |
+           (open_towards(m, at, (dir + 2) % 8) ? 2 : 0);
+}
+
+/* Picks the direction of the run's next step, following corridors around
+ * corners. Returns false where the run should stop: a wall ahead, a fork or
+ * a dead end. */
+static bool run_choose_dir(Game *g)
+{
+    Run *r = &g->run;
+    Vec2 at = g->player.pos;
+    if (r->room || r->dir % 2 != 0) /* in the open, or diagonal: straight on */
+        return open_towards(g->map, at, r->dir);
+
+    int back = (r->dir + 4) % 8, exits = 0, exit = -1;
+    for (int d = 0; d < 8; d += 2)
+        if (d != back && open_towards(g->map, at, d))
+        {
+            exits++;
+            exit = d;
+        }
+    if (exits != 1)
+        return false;
+    r->dir = exit;
+    return true;
+}
+
+/* One step of the run; false once it should stop. */
+static bool run_step(Game *g)
+{
+    Run *r = &g->run;
+    if (r->steps > 0 && !run_choose_dir(g))
+        return false;
+
+    int serial = msglog_next_serial(&g->log), hp = g->player.hp;
+    if (!try_move(g, MOVE_DIR[r->dir]))
+        return false;
+    r->steps++;
+    end_action(g);
+
+    Vec2 at = g->player.pos;
+    bool room = !in_corridor(g->map, at);
+    int sides = run_sides(g->map, at, r->dir);
+    bool changed =
+        r->steps > 1 && (room != r->room || (room && r->dir % 2 == 0 && sides != r->sides));
+    r->room = room;
+    r->sides = sides;
+    return !changed && !game_over(g) && msglog_next_serial(&g->log) == serial &&
+           g->player.hp >= hp && !monster_in_view(g) && map_get(g->map, at.x, at.y) == TILE_FLOOR &&
+           level_item_at(game_level(g), at) < 0 && r->steps < RUN_MAX;
+}
+
+/* Runs turn-based to the end, or in real time while the player is ready. */
+static void run_on(Game *g)
+{
+    while (g->run.active && game_ready(g))
+        if (!run_step(g))
+            g->run.active = false;
+}
+
+bool game_run_active(const Game *g)
+{
+    return g->run.active;
+}
+
+void game_run_continue(Game *g)
+{
+    if (g->run.active && game_ready(g))
+    {
+        g->fresh_serial = msglog_next_serial(&g->log);
+        run_on(g);
+    }
+}
+
+void game_run_stop(Game *g)
+{
+    g->run.active = false;
+}
+
+/* Starts a run; confused or with a monster in view it is one ordinary step. */
+static bool start_run(Game *g, int dir)
+{
+    if (g->player.confused > 0 || monster_in_view(g))
+    {
+        bool used = try_move(g, MOVE_DIR[dir]);
+        if (used)
+            end_action(g);
+        return used;
+    }
+    g->run = (Run){.active = true, .dir = dir};
+    run_on(g);
+    return g->run.steps > 0;
+}
+
 bool game_step(Game *g, Action a)
 {
     return game_step_item(g, a, -1);
@@ -481,6 +598,7 @@ bool game_step_item(Game *g, Action a, int item)
     }
     if (!game_ready(g))
         return false;
+    g->run.active = false;
 
     bool used_turn = false;
     if (a >= ACTION_MOVE_N && a <= ACTION_MOVE_NW)
@@ -497,6 +615,8 @@ bool game_step_item(Game *g, Action a, int item)
         used_turn = inv_use(g, item);
     else if (a == ACTION_DROP)
         used_turn = inv_drop(g, item);
+    else if (a >= ACTION_RUN_N && a <= ACTION_RUN_NW)
+        return start_run(g, a - ACTION_RUN_N); /* acts step by step itself */
 
     if (used_turn)
         end_action(g);

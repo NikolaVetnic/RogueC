@@ -149,8 +149,8 @@ static void drink(Game *g, PotionKind kind)
     case POTION_POISON:
         msglog_add(&g->log, g->turn, "You feel very sick.");
         p->hp -= rng_range(&g->rng, POISON_MIN, POISON_MAX);
-        if (p->hp <= 0)
-            game_kill_player(g, DEATH_POISON);
+        if (p->hp < 1)
+            p->hp = 1; /* sick, not dead: a desperate drink shouldn't end the game */
         break;
     case POTION_SPEED:
         p->haste += HASTE_TICKS;

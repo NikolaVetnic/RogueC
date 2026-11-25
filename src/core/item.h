@@ -97,6 +97,7 @@ typedef struct
 enum
 {
     TITLE_SIZE = 24,
+    POTION_LOOK_COUNT = 12, /* colours a potion can have */
 };
 
 /* What potions look like and scrolls are titled in this game, and which

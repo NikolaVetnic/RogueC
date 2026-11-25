@@ -236,7 +236,7 @@ static void potions_have_effects(void)
     g.player.hp = 2;
     inv_add(&g.player, (Item){.cls = ITEM_POTION, .kind = POTION_POISON, .count = 1});
     game_step_item(&g, ACTION_USE, g.player.pack_count - 1);
-    CHECK(g.dead && g.death == DEATH_POISON);
+    CHECK(!g.dead && g.player.hp == 1); /* poison leaves you at 1 HP, never dead */
     game_free(&g);
 }
 
@@ -281,7 +281,7 @@ static void pack_screen_uses_and_drops(void)
     Game g;
     Ui ui;
     open_game(&g);
-    ui_init(&ui, NULL);
+    ui_init(&ui, NULL, NULL);
 
     ui_key(&ui, &g, 'i');
     CHECK(ui.screen == SCREEN_PACK);
@@ -293,7 +293,7 @@ static void pack_screen_uses_and_drops(void)
 
     ui_key(&ui, &g, 'c'); /* eat the ration */
     CHECK(ui.screen == SCREEN_MAP && g.player.pack_count == 2);
-    ui_key(&ui, &g, 'D');
+    ui_key(&ui, &g, 'x');
     ui_key(&ui, &g, 'b'); /* drop the armour */
     CHECK(g.player.pack_count == 1 && game_level(&g)->item_count == 1);
     ui_key(&ui, &g, 'i');

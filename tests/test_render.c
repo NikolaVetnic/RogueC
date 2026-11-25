@@ -26,7 +26,7 @@ static void player_shown_once_with_status_line(void)
     Game g;
     game_init(&g, 5);
     int cols = 50, rows = 20, px = -1, py = -1;
-    render_game(&g, cells, cols, rows);
+    render_game(&g, cells, cols, rows, (MapView){.log_lines = 2});
 
     CHECK(find_player(cols, rows, &px, &py) == 1);
     CHECK(cells[py * cols + px].style == STYLE_PLAYER);
@@ -43,7 +43,7 @@ static void unexplored_cells_are_blank_and_seen_cells_dim(void)
     clear_monsters(&g);
     map_clear_visible(g.map);
     map_clear_explored(g.map);
-    render_game(&g, cells, 50, 20);
+    render_game(&g, cells, 50, 20, (MapView){.log_lines = 2});
     for (int i = 2 * 50; i < 50 * 19; i++) /* below the two message lines */
         CHECK(cells[i].glyph == ' ' || cells[i].glyph == '@');
 
@@ -52,7 +52,7 @@ static void unexplored_cells_are_blank_and_seen_cells_dim(void)
     find_player(50, 20, &px, &py);
     map_mark_seen(g.map, g.player.pos.x + 1, g.player.pos.y);
     map_clear_visible(g.map);
-    render_game(&g, cells, 50, 20);
+    render_game(&g, cells, 50, 20, (MapView){.log_lines = 2});
     uint8_t s = cells[py * 50 + px + 1].style;
     CHECK(s == STYLE_FLOOR_SEEN || s == STYLE_WALL_SEEN);
     game_free(&g);
@@ -62,14 +62,14 @@ static void tiny_and_huge_screens_are_safe(void)
 {
     Game g;
     game_init(&g, 5);
-    render_game(&g, cells, 1, 1);
+    render_game(&g, cells, 1, 1, (MapView){.log_lines = 2});
     CHECK(cells[0].glyph == '@'); /* camera centres on the player */
-    render_game(&g, cells, 0, 0);
+    render_game(&g, cells, 0, 0, (MapView){.log_lines = 2});
     game_free(&g);
 
     static Cell big[200 * 60];
     game_init(&g, 5);
-    render_game(&g, big, 200, 60); /* larger than the map: centred */
+    render_game(&g, big, 200, 60, (MapView){.log_lines = 2}); /* larger than the map: centred */
     int at = 0;
     for (int i = 0; i < 200 * 60; i++)
         at += big[i].glyph == '@';
@@ -84,15 +84,15 @@ static void messages_on_top(void)
     game_init(&g, 5);
     clear_monsters(&g);
     msglog_add(&g.log, 0, "Second");
-    render_game(&g, cells, 50, 20);
+    render_game(&g, cells, 50, 20, (MapView){.log_lines = 2});
     CHECK(cells[1].glyph == 'Y' && cells[1].style == STYLE_TEXT); /* "You enter..." */
     CHECK(cells[50 + 1].glyph == 'S' && cells[50 + 1].style == STYLE_TEXT);
 
     game_step(&g, ACTION_WAIT);
-    render_game(&g, cells, 50, 20);
+    render_game(&g, cells, 50, 20, (MapView){.log_lines = 2});
     CHECK(cells[50 + 1].style == STYLE_TEXT_DIM);
 
-    render_game(&g, cells, 50, 9); /* too small: map and status only */
+    render_game(&g, cells, 50, 9, (MapView){.log_lines = 2}); /* too small: map and status only */
     int px = -1, py = -1;
     CHECK(find_player(50, 9, &px, &py) == 1);
     CHECK(cells[1].glyph != 'Y');
@@ -108,7 +108,7 @@ static void stairs_are_drawn(void)
     Vec2 down = g.levels[0].stairs_down; /* on open floor: the cell west is floor */
     g.player.pos = vec2(down.x - 1, down.y);
     game_step(&g, ACTION_WAIT); /* looks around */
-    render_game(&g, cells, 50, 20);
+    render_game(&g, cells, 50, 20, (MapView){.log_lines = 2});
     int found = 0;
     for (int i = 0; i < 50 * 20; i++)
         found += cells[i].glyph == '>' && cells[i].style == STYLE_STAIRS_LIT;

@@ -34,13 +34,9 @@ const ArmourInfo ARMOURS[ARMOUR_COUNT] = {
     [ARMOUR_PLATE] = {"plate armour", 7, 7},
 };
 
-static const char *const POTION_LOOKS[] = {
+static const char *const POTION_LOOKS[POTION_LOOK_COUNT] = {
     "red",   "blue",  "green", "murky",  "fizzy", "golden",
     "black", "milky", "smoky", "violet", "amber", "silver",
-};
-enum
-{
-    LOOK_COUNT = sizeof POTION_LOOKS / sizeof POTION_LOOKS[0],
 };
 
 static const char *const SYLLABLES[] = {
@@ -52,10 +48,10 @@ void item_lore_init(ItemLore *lore, Rng *rng)
 {
     *lore = (ItemLore){0};
 
-    uint8_t order[LOOK_COUNT];
-    for (int i = 0; i < LOOK_COUNT; i++)
+    uint8_t order[POTION_LOOK_COUNT];
+    for (int i = 0; i < POTION_LOOK_COUNT; i++)
         order[i] = (uint8_t)i;
-    for (int i = LOOK_COUNT - 1; i > 0; i--) /* Fisher-Yates shuffle */
+    for (int i = POTION_LOOK_COUNT - 1; i > 0; i--) /* Fisher-Yates shuffle */
     {
         int j = rng_range(rng, 0, i);
         uint8_t t = order[i];
@@ -132,12 +128,19 @@ Item item_random(Rng *rng, int depth)
 {
     int roll = rng_range(rng, 0, 99);
     Item it = {.count = 1};
-    if (roll < 20)
+    if (roll < 25)
         it.cls = ITEM_FOOD;
     else if (roll < 50)
     {
+        /* Healing is the most common kind: a third of all potions. */
+        static const int WEIGHT[POTION_COUNT] = {
+            [POTION_HEALING] = 22, [POTION_EXTRA_HEALING] = 12, [POTION_POISON] = 16,
+            [POTION_SPEED] = 16,   [POTION_CONFUSION] = 17,     [POTION_BLINDNESS] = 17,
+        };
+        int w = rng_range(rng, 0, 99);
         it.cls = ITEM_POTION;
-        it.kind = rng_range(rng, 0, POTION_COUNT - 1);
+        for (it.kind = 0; w >= WEIGHT[it.kind]; it.kind++)
+            w -= WEIGHT[it.kind];
     }
     else if (roll < 80)
     {

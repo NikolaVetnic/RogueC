@@ -17,7 +17,7 @@
 #include "core/game.h"
 #include "core/render.h"
 #include "core/ui.h"
-#include "platform/common/score_store.h"
+#include "platform/common/store.h"
 
 #define FONT_FILE "assets/fonts/JetBrainsMono-Regular.ttf"
 /* raylib's font size is the line height (ascent + descent), in logical pixels;
@@ -31,6 +31,8 @@ typedef struct
     Game game;
     Ui ui;
     ScoreTable scores;
+    Settings settings;
+    bool use_store; /* false for --screenshot: leave saves and scores alone */
     Font font;
     float scale;     /* drawing units per logical pixel: devicePixelRatio on the web, else 1 */
     float font_size; /* FONT_SIZE * scale */
@@ -42,13 +44,14 @@ typedef struct
     bool quit;
 } App;
 
-/* Command-line options (desktop only). */
+/* Command-line arguments (desktop only). */
 typedef struct
 {
     uint64_t seed;
+    bool seed_given;        /* a new game from this seed, not the saved one */
     const char *screenshot; /* save one frame here and exit */
     const char *keys;       /* typed before the screenshot */
-} Options;
+} Args;
 
 /* ---- input ---------------------------------------------------------------- */
 
@@ -79,11 +82,18 @@ static void press(App *app, int key)
         app->quit = true;
 }
 
+/* The ui key for a raylib key; arrows and Home/End/PgUp/PgDn with Shift run. */
 static int special_key(int key)
 {
     for (size_t i = 0; i < sizeof SPECIAL_KEYS / sizeof SPECIAL_KEYS[0]; i++)
         if (SPECIAL_KEYS[i].key == key)
-            return SPECIAL_KEYS[i].ui_key;
+        {
+            int ui_key = SPECIAL_KEYS[i].ui_key;
+            bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+            return shift && ui_key >= UI_KEY_UP && ui_key <= UI_KEY_PAGE_DOWN
+                       ? ui_key | UI_KEY_SHIFT
+                       : ui_key;
+        }
     return 0;
 }
 
@@ -100,7 +110,7 @@ static void handle_input(App *app)
 
     for (size_t i = 0; i < sizeof SPECIAL_KEYS / sizeof SPECIAL_KEYS[0]; i++)
         if (IsKeyPressedRepeat(SPECIAL_KEYS[i].key))
-            press(app, SPECIAL_KEYS[i].ui_key);
+            press(app, special_key(SPECIAL_KEYS[i].key));
 }
 
 /* ---- drawing -------------------------------------------------------------- */
@@ -203,6 +213,69 @@ static void draw(const App *app)
     EndDrawing();
 }
 
+/* ---- games and storage ------------------------------------------------------ */
+
+static void new_ui(App *app)
+{
+    ui_init(&app->ui, &app->scores, &app->settings);
+#ifndef __EMSCRIPTEN__
+    app->ui.can_exit = true; /* a page can't close itself */
+#endif
+}
+
+/* A new game (the saved one if `resume`); false if out of memory. */
+static bool start_game(App *app, bool resume, uint64_t seed)
+{
+    bool ok = app->use_store ? store_start_game(&app->game, resume, seed, &app->settings)
+                             : game_init(&app->game, seed);
+    new_ui(app);
+    return ok;
+}
+
+/* The frontend's side of the ui's requests: saving and deleting. */
+static void store_requests(App *app)
+{
+    Ui *ui = &app->ui;
+    if (app->use_store)
+    {
+        if (ui->scores_changed)
+            store_save_scores(&app->scores);
+        if (ui->settings_changed)
+            store_save_settings(&app->settings);
+        if (ui->save_wanted)
+            store_save_game(&app->game);
+        if (ui->save_delete)
+            store_delete_game();
+    }
+    ui->scores_changed = ui->settings_changed = ui->save_wanted = ui->save_delete = false;
+}
+
+/* The window or tab is closing: keep the game. */
+static void save_on_exit(App *app)
+{
+    if (app->use_store && !app->ui.save_delete)
+        store_save_game(&app->game); /* does nothing if the game is over */
+}
+
+#ifdef __EMSCRIPTEN__
+static const char *on_before_unload(int type, const void *reserved, void *arg)
+{
+    (void)type;
+    (void)reserved;
+    save_on_exit(arg);
+    return NULL; /* no "leave this page?" question */
+}
+
+/* Phones may close a hidden tab without an unload event: save when hidden. */
+static bool on_visibility_change(int type, const EmscriptenVisibilityChangeEvent *e, void *arg)
+{
+    (void)type;
+    if (e->hidden)
+        save_on_exit(arg);
+    return false;
+}
+#endif
+
 /* ---- main loop ------------------------------------------------------------ */
 
 #ifdef __EMSCRIPTEN__
@@ -232,25 +305,14 @@ static void frame(void *arg)
 #endif
     handle_input(app);
     ui_update(&app->ui, &app->game, (int)(GetFrameTime() * 1000.0f));
-    if (app->ui.scores_changed)
-    {
-        score_store_save(&app->scores);
-        app->ui.scores_changed = false;
-    }
-    if (app->ui.new_game) /* from the death screen */
+    store_requests(app);
+    if (app->ui.new_game) /* from the end screen, or a game given up */
     {
         game_free(&app->game);
-        app->quit = !game_init(&app->game, (uint64_t)time(NULL));
-        ui_init(&app->ui, &app->scores);
+        app->quit = !start_game(app, false, (uint64_t)time(NULL));
     }
 
 #ifdef __EMSCRIPTEN__
-    if (app->quit) /* a page can't close itself: start a new game instead */
-    {
-        game_free(&app->game);
-        app->quit = !game_init(&app->game, (uint64_t)time(NULL));
-        ui_init(&app->ui, &app->scores);
-    }
     if (app->quit || !fit_grid(app))
     {
         emscripten_cancel_main_loop();
@@ -279,9 +341,9 @@ static void save_screenshot(const char *path)
 }
 #endif
 
-static Options parse_options(int argc, char **argv)
+static Args parse_args(int argc, char **argv)
 {
-    Options o = {.seed = (uint64_t)time(NULL)};
+    Args o = {.seed = (uint64_t)time(NULL)};
     for (int i = 1; i < argc; i++)
     {
         if (strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc)
@@ -289,7 +351,10 @@ static Options parse_options(int argc, char **argv)
         else if (strcmp(argv[i], "--keys") == 0 && i + 1 < argc)
             o.keys = argv[++i];
         else
+        {
             o.seed = strtoull(argv[i], NULL, 10);
+            o.seed_given = true;
+        }
     }
     return o;
 }
@@ -297,9 +362,13 @@ static Options parse_options(int argc, char **argv)
 int main(int argc, char **argv)
 {
     static App app; /* static: outlives main's frame under Emscripten */
-    Options opt = parse_options(argc, argv);
+    Args opt = parse_args(argc, argv);
 
-    if (!game_init(&app.game, opt.seed))
+    app.use_store = !opt.screenshot;
+    app.settings = app.use_store ? store_load_settings() : settings_default();
+    if (app.use_store)
+        store_load_scores(&app.scores);
+    if (!start_game(&app, !opt.seed_given, opt.seed))
     {
         fprintf(stderr, "Out of memory while generating the level.\n");
         return EXIT_FAILURE;
@@ -311,14 +380,14 @@ int main(int argc, char **argv)
 #else
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_WINDOW_HIGHDPI | FLAG_VSYNC_HINT);
 #endif
-    score_store_load(&app.scores);
-    ui_init(&app.ui, &app.scores);
     InitWindow(800, 600, "RogueC");
     SetExitKey(KEY_NULL); /* Esc doesn't close the game */
 
     setup_text(&app);
 
 #ifdef __EMSCRIPTEN__
+    emscripten_set_beforeunload_callback(&app, on_before_unload);
+    emscripten_set_visibilitychange_callback(&app, false, on_visibility_change);
     emscripten_set_main_loop_arg(frame, &app, 0, true); /* never returns */
 #else
     /* START_COLS x START_ROWS cells, or less on a small screen */
@@ -356,6 +425,8 @@ int main(int argc, char **argv)
             }
             frame(&app);
         }
+        if (!app.quit) /* the window was closed */
+            save_on_exit(&app);
     }
 
     UnloadFont(app.font);

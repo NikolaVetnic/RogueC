@@ -4,7 +4,6 @@
 
 enum
 {
-    LOG_LINES = 2,     /* messages shown on the map screen */
     LOG_MIN_ROWS = 10, /* below this, the map gets the room */
 };
 
@@ -143,7 +142,7 @@ void render_message_text(const Message *m, char *out, int size)
 
 /* " Depth 3   HP 12/20   Gold 45   Turn 345   Hungry Hasted   REAL TIME   ? help  i items",
  * the warnings in the alert style. */
-static void render_status(const Game *g, Cell *cells, int cols, int row)
+static void render_status(const Game *g, Cell *cells, int cols, int row, bool can_exit)
 {
     static const char *const HUNGER[] = {"", "Hungry", "Weak", "Starving"};
     const Player *p = &g->player;
@@ -160,7 +159,9 @@ static void render_status(const Game *g, Cell *cells, int cols, int row)
             x = render_text(cells, cols, row + 1, x + 1, row, alerts[i], STYLE_STATUS_ALERT);
     if (g->realtime)
         x = render_text(cells, cols, row + 1, x + 3, row, "REAL TIME", STYLE_STATUS);
-    render_text(cells, cols, row + 1, x + 6, row, "? help   i items   m messages   q quit",
+    render_text(cells, cols, row + 1, x + 6, row,
+                can_exit ? "? help   i items   o options   q save & quit"
+                         : "? help   i items   o options   q save",
                 STYLE_STATUS);
 }
 
@@ -180,25 +181,25 @@ static void render_log(const Game *g, Cell *cells, int cols, int lines)
     }
 }
 
-void render_game(const Game *g, Cell *cells, int cols, int rows)
+void render_game(const Game *g, Cell *cells, int cols, int rows, MapView view)
 {
     if (cols <= 0 || rows <= 0)
         return;
 
-    int log_rows = rows >= LOG_MIN_ROWS ? LOG_LINES : 0;
+    int log_rows = rows >= LOG_MIN_ROWS + view.log_lines - 2 ? view.log_lines : 0;
     int status_rows = rows >= 2 ? 1 : 0;
     int view_rows = rows - log_rows - status_rows;
     int cam_x = camera_origin(g->map->w, cols, g->player.pos.x);
     int cam_y = camera_origin(g->map->h, view_rows, g->player.pos.y);
 
     render_log(g, cells, cols, log_rows);
-    Cell *view = cells + log_rows * cols;
+    Cell *map_cells = cells + log_rows * cols;
     for (int sy = 0; sy < view_rows; sy++)
         for (int sx = 0; sx < cols; sx++)
-            render_cell(g, view, cols, sx, sy, cam_x + sx, cam_y + sy);
+            render_cell(g, map_cells, cols, sx, sy, cam_x + sx, cam_y + sy);
 
     if (status_rows)
-        render_status(g, cells, cols, rows - 1);
+        render_status(g, cells, cols, rows - 1, view.can_exit);
 }
 
 int utf8_encode(uint32_t cp, char out[5])
