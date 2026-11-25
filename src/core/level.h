@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "core/item.h"
 #include "core/map.h"
 #include "core/monster.h"
 #include "core/vec2.h"
@@ -13,8 +14,16 @@
 enum
 {
     LEVEL_MAX_MONSTERS = 32,
+    LEVEL_MAX_ITEMS = 48,
     SPAWN_MIN_DIST = 12, /* starting monsters are this many steps from the arrival point */
 };
+
+typedef struct
+{
+    Item item;
+    Vec2 pos;
+    bool seen; /* remembered on the map once seen */
+} FloorItem;
 
 typedef struct
 {
@@ -24,10 +33,13 @@ typedef struct
     bool caves;       /* cave level, else rooms and corridors */
     Monster monsters[LEVEL_MAX_MONSTERS];
     int monster_count;
+    FloorItem items[LEVEL_MAX_ITEMS]; /* at most one per cell */
+    int item_count;
 } Level;
 
 /* Generates the level at `depth` (1 = top) of a dungeon `bottom` levels deep,
- * w x h cells, with 3 + depth monsters. The same seed and depth always give
+ * w x h cells, with 3 + depth monsters, 2-4 piles of gold and 3 + depth / 3
+ * other items. The same seed and depth always give
  * the same level, whatever else happened in the game. Returns false if out of
  * memory (or if the map is too small for two rooms). */
 bool level_generate(Level *lv, uint64_t seed, int depth, int bottom, int w, int h);
@@ -43,5 +55,11 @@ int level_monster_at(const Level *lv, Vec2 pos);
 bool level_add_monster(Level *lv, Monster m);
 /* Removes monster i; the last one takes its index. */
 void level_remove_monster(Level *lv, int i);
+
+/* Index of the item at `pos`, or -1. */
+int level_item_at(const Level *lv, Vec2 pos);
+/* Returns false if the level is full or something lies there already. */
+bool level_add_item(Level *lv, Item it, Vec2 pos);
+void level_remove_item(Level *lv, int i);
 
 #endif

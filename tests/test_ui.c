@@ -70,7 +70,7 @@ static void help_opens_and_any_key_closes(void)
     CHECK(ui.screen == SCREEN_HELP);
     ui_render(&ui, &g, cells, COLS, ROWS);
     CHECK(screen_has("Help") && screen_has("Message history") && screen_has("Quit"));
-    CHECK(!screen_has("Seed")); /* not the map screen */
+    CHECK(!screen_has("Depth")); /* not the map screen (no status line) */
 
     ui_key(&ui, &g, 'd'); /* closes help, does not move */
     CHECK(ui.screen == SCREEN_MAP);

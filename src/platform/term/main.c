@@ -68,6 +68,10 @@ static void init_styles_8(void)
         [STYLE_MON_HUMANOID] = {COLOR_GREEN, A_BOLD},
         [STYLE_MON_UNDEAD] = {COLOR_WHITE, A_BOLD},
         [STYLE_MON_BRUTE] = {COLOR_RED, A_BOLD},
+        [STYLE_ITEM] = {COLOR_MAGENTA, A_BOLD},
+        [STYLE_ITEM_SEEN] = {COLOR_MAGENTA, 0},
+        [STYLE_GOLD] = {COLOR_YELLOW, A_BOLD},
+        [STYLE_STATUS_ALERT] = {COLOR_RED, A_REVERSE | A_BOLD},
         [STYLE_STATUS] = {COLOR_WHITE, A_REVERSE},
         [STYLE_TEXT] = {COLOR_WHITE, A_BOLD},
         [STYLE_TEXT_DIM] = {COLOR_WHITE, A_DIM},
@@ -91,6 +95,8 @@ static void init_styles(void)
         style_attr[STYLE_STAIRS_LIT] = A_BOLD;
         style_attr[STYLE_STAIRS_SEEN] = A_DIM;
         style_attr[STYLE_STATUS] = A_REVERSE;
+        style_attr[STYLE_STATUS_ALERT] = A_REVERSE | A_BOLD;
+        style_attr[STYLE_ITEM_SEEN] = A_DIM;
         style_attr[STYLE_TEXT_DIM] = A_DIM;
         style_attr[STYLE_HEADING] = A_BOLD;
         for (int s = STYLE_MON_BEAST; s <= STYLE_MON_BRUTE; s++)

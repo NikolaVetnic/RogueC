@@ -31,6 +31,7 @@ static Action action_for_key(int key)
     case 'Z':                                                      return ACTION_REST;
     case '>':                                                      return ACTION_DESCEND;
     case '<':                                                      return ACTION_ASCEND;
+    case ',': case 'g':                                            return ACTION_PICK_UP;
     case 'q': case 'Q':                                            return ACTION_QUIT;
     default:                                                       return ACTION_NONE;
     }
@@ -62,17 +63,29 @@ static void log_key(Ui *ui, const Game *g, int key)
 
 /* Turn-based, or ready: act now. Real time and not ready: keep the latest
  * move for when the player is (quitting never waits). */
-static void act(Ui *ui, Game *g, Action a)
+static void act(Ui *ui, Game *g, Action a, int item)
 {
     if (a == ACTION_NONE)
         return;
     if (g->realtime && a != ACTION_QUIT && !game_ready(g))
+    {
         ui->pending = a;
+        ui->pending_item = item;
+    }
     else
     {
         ui->pending = ACTION_NONE;
-        game_step(g, a);
+        game_step_item(g, a, item);
     }
+}
+
+/* A pack letter: use or drop that item, back to the map. Other keys: back. */
+static void pack_key(Ui *ui, Game *g, int key)
+{
+    ui->screen = SCREEN_MAP;
+    int i = key - 'a';
+    if (i >= 0 && i < g->player.pack_count)
+        act(ui, g, ui->pack_purpose == PACK_USE ? ACTION_USE : ACTION_DROP, i);
 }
 
 static void check_death(Ui *ui, const Game *g)
@@ -93,6 +106,11 @@ void ui_key(Ui *ui, Game *g, int key)
             ui->screen = SCREEN_LOG;
             ui->scroll = 0;
         }
+        else if (key == 'i' || key == 'D')
+        {
+            ui->screen = SCREEN_PACK;
+            ui->pack_purpose = key == 'i' ? PACK_USE : PACK_DROP;
+        }
         else if (key == 'T')
         {
             game_set_realtime(g, !g->realtime);
@@ -100,7 +118,11 @@ void ui_key(Ui *ui, Game *g, int key)
             ui->clock_ms = 0;
         }
         else
-            act(ui, g, action_for_key(key));
+            act(ui, g, action_for_key(key), -1);
+        check_death(ui, g);
+        break;
+    case SCREEN_PACK:
+        pack_key(ui, g, key);
         check_death(ui, g);
         break;
     case SCREEN_HELP:
@@ -132,7 +154,7 @@ void ui_update(Ui *ui, Game *g, int elapsed_ms)
     for (;;)
     {
         if (ui->pending != ACTION_NONE && game_ready(g))
-            act(ui, g, ui->pending);
+            act(ui, g, ui->pending, ui->pending_item);
         if (ui->clock_ms < UI_TICK_MS || g->dead)
             break;
         ui->clock_ms -= UI_TICK_MS;
@@ -153,6 +175,9 @@ static const struct
     {"Attack", "move into a monster"},
     {"Wait a turn", ".   numpad 5"},
     {"Rest until healed", "Z"},
+    {"Pick up", ",   g"},
+    {"Inventory: use an item", "i   then the item's letter"},
+    {"Drop an item", "D   then the item's letter"},
     {"Stairs down / up", ">   <   (standing on them)"},
     {"Message history", "m   Ctrl-P"},
     {"Real time on / off", "T   (the dungeon moves on its own; help and history pause it)"},
@@ -175,12 +200,12 @@ static const struct
     {GLYPH_STAIRS_UP, STYLE_STAIRS_LIT, "stairs up"},
 };
 
-static void render_help(Cell *cells, int cols, int rows)
+static void render_help(const Game *g, Cell *cells, int cols, int rows)
 {
     enum
     {
         LEFT = 2,
-        KEYS_X = 22, /* column of the key names */
+        KEYS_X = 27, /* column of the key names */
     };
     int y = 1;
 
@@ -195,7 +220,6 @@ static void render_help(Cell *cells, int cols, int rows)
 
     y++;
     render_text(cells, cols, rows, LEFT, y++, "Map", STYLE_HEADING);
-    y++;
     for (size_t i = 0; i < sizeof HELP_LEGEND / sizeof HELP_LEGEND[0]; i++, y++)
     {
         if (y < rows && LEFT < cols)
@@ -212,7 +236,24 @@ static void render_help(Cell *cells, int cols, int rows)
     render_text(cells, cols, rows, LEFT + 2 * MON_COUNT + 2, y++, "monsters, deeper ones tougher",
                 STYLE_TEXT);
 
-    render_text(cells, cols, rows, LEFT, y + 1, "Press any key to go back.", STYLE_TEXT_DIM);
+    /* Items: glyph and word. */
+    static const char *const ITEM_WORDS[ITEM_CLASS_COUNT] = {"gold",   "food",   "potion",
+                                                             "scroll", "weapon", "armour"};
+    int x = LEFT;
+    for (int c = 0; c < ITEM_CLASS_COUNT; c++)
+    {
+        if (y < rows && x < cols)
+            cells[y * cols + x] =
+                (Cell){.glyph = item_glyph((ItemClass)c),
+                       .style = (uint8_t)(c == ITEM_GOLD ? STYLE_GOLD : STYLE_ITEM)};
+        x = render_text(cells, cols, rows, x + 2, y, ITEM_WORDS[c], STYLE_TEXT) + 3;
+    }
+    y++;
+
+    char seed[48];
+    snprintf(seed, sizeof seed, "Seed %llu", (unsigned long long)g->seed);
+    render_text(cells, cols, rows, LEFT, y + 1, seed, STYLE_TEXT_DIM);
+    render_text(cells, cols, rows, LEFT, y + 2, "Press any key to go back.", STYLE_TEXT_DIM);
 }
 
 /* Messages oldest first, the newest last; ui->scroll lines up from it. */
@@ -255,13 +296,19 @@ static void render_death(const Game *g, Cell *cells, int cols, int rows)
     {
         LEFT = 2,
     };
-    char text[128];
+    char text[128], cause[48];
     MonsterKind k = g->killer;
+    if (g->death == DEATH_STARVATION)
+        snprintf(cause, sizeof cause, "Starved to death");
+    else if (g->death == DEATH_POISON)
+        snprintf(cause, sizeof cause, "Poisoned");
+    else
+        snprintf(cause, sizeof cause, "Killed by %s %s", monster_article(k), MONSTERS[k].name);
 
     render_clear(cells, cols, rows, STYLE_DEFAULT);
     render_text(cells, cols, rows, LEFT, 1, "You died.", STYLE_HEADING);
-    snprintf(text, sizeof text, "Killed by %s %s on depth %d, turn %d.", monster_article(k),
-             MONSTERS[k].name, g->depth, g->turn);
+    snprintf(text, sizeof text, "%s on depth %d, turn %d, with %d gold.", cause, g->depth, g->turn,
+             g->player.gold);
     render_text(cells, cols, rows, LEFT, 3, text, STYLE_TEXT);
     snprintf(text, sizeof text, "Seed %llu", (unsigned long long)g->seed);
     render_text(cells, cols, rows, LEFT, 4, text, STYLE_TEXT_DIM);
@@ -270,6 +317,39 @@ static void render_death(const Game *g, Cell *cells, int cols, int rows)
     x = render_text(cells, cols, rows, x, 6, ": new game    ", STYLE_TEXT);
     x = render_text(cells, cols, rows, x, 6, "q", STYLE_KEY);
     render_text(cells, cols, rows, x, 6, ": quit", STYLE_TEXT);
+}
+
+static void render_pack(const Ui *ui, const Game *g, Cell *cells, int cols, int rows)
+{
+    enum
+    {
+        LEFT = 2,
+        TOP = 3,
+    };
+    const Player *p = &g->player;
+    render_clear(cells, cols, rows, STYLE_DEFAULT);
+    render_text(cells, cols, rows, LEFT, 0,
+                ui->pack_purpose == PACK_USE ? "Inventory: use which item?" : "Drop which item?",
+                STYLE_HEADING);
+    render_text(cells, cols, rows, LEFT, 1,
+                ui->pack_purpose == PACK_USE ? "Its letter eats, drinks, reads, wields, wears, or "
+                                               "takes off; any other key goes back."
+                                             : "Its letter drops it; any other key goes back.",
+                STYLE_TEXT_DIM);
+    if (p->pack_count == 0)
+        render_text(cells, cols, rows, LEFT, TOP, "(your pack is empty)", STYLE_TEXT_DIM);
+
+    for (int i = 0; i < p->pack_count; i++)
+    {
+        char name[80], letter[4] = {(char)('a' + i), ' ', '-', '\0'};
+        item_name(&g->lore, &p->pack[i], name, sizeof name);
+        int x = render_text(cells, cols, rows, LEFT, TOP + i, letter, STYLE_KEY);
+        render_text(cells, cols, rows, x + 1, TOP + i, name, STYLE_TEXT);
+    }
+    char gold[32];
+    snprintf(gold, sizeof gold, "Gold: %d", p->gold);
+    render_text(cells, cols, rows, LEFT, TOP + (p->pack_count > 0 ? p->pack_count : 1) + 1, gold,
+                STYLE_GOLD);
 }
 
 void ui_render(Ui *ui, const Game *g, Cell *cells, int cols, int rows)
@@ -283,13 +363,16 @@ void ui_render(Ui *ui, const Game *g, Cell *cells, int cols, int rows)
         render_game(g, cells, cols, rows);
         break;
     case SCREEN_HELP:
-        render_help(cells, cols, rows);
+        render_help(g, cells, cols, rows);
         break;
     case SCREEN_LOG:
         render_history(ui, g, cells, cols, rows);
         break;
     case SCREEN_DEATH:
         render_death(g, cells, cols, rows);
+        break;
+    case SCREEN_PACK:
+        render_pack(ui, g, cells, cols, rows);
         break;
     }
 }

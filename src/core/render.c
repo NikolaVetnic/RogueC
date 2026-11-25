@@ -1,6 +1,5 @@
 #include "core/render.h"
 
-#include <inttypes.h>
 #include <stdio.h>
 
 enum
@@ -25,7 +24,11 @@ const StyleColor STYLE_COLORS[STYLE_COUNT] = {
     [STYLE_MON_HUMANOID] = {.fg = {132, 204, 96}},
     [STYLE_MON_UNDEAD] = {.fg = {196, 206, 232}},
     [STYLE_MON_BRUTE] = {.fg = {236, 86, 74}},
+    [STYLE_ITEM] = {.fg = {226, 140, 226}},
+    [STYLE_ITEM_SEEN] = {.fg = {110, 76, 120}},
+    [STYLE_GOLD] = {.fg = {250, 226, 90}},
     [STYLE_STATUS] = {.fg = {222, 212, 192}, .bg = {50, 45, 40}, .has_bg = true},
+    [STYLE_STATUS_ALERT] = {.fg = {255, 120, 100}, .bg = {50, 45, 40}, .has_bg = true},
     [STYLE_TEXT] = {.fg = {226, 220, 208}},
     [STYLE_TEXT_DIM] = {.fg = {112, 114, 128}},
     [STYLE_HEADING] = {.fg = {255, 210, 70}},
@@ -72,12 +75,23 @@ static void render_cell(const Game *g, Cell *cells, int cols, int sx, int sy, in
     const Map *m = g->map;
     const Level *lv = &g->levels[g->depth - 1];
     int mon = map_is_visible(m, mx, my) ? level_monster_at(lv, vec2(mx, my)) : -1;
+    int item = level_item_at(lv, vec2(mx, my));
+    if (item >= 0 && (!lv->items[item].seen || !map_is_explored(m, mx, my)))
+        item = -1;
 
     if (vec2_eq(g->player.pos, vec2(mx, my)))
         put(cells, cols, sx, sy, GLYPH_PLAYER, STYLE_PLAYER);
     else if (mon >= 0)
         put(cells, cols, sx, sy, MONSTERS[lv->monsters[mon].kind].glyph,
             render_monster_style(lv->monsters[mon].kind));
+    else if (item >= 0)
+    {
+        ItemClass cls = lv->items[item].item.cls;
+        Style s = !map_is_visible(m, mx, my) ? STYLE_ITEM_SEEN
+                  : cls == ITEM_GOLD         ? STYLE_GOLD
+                                             : STYLE_ITEM;
+        put(cells, cols, sx, sy, item_glyph(cls), s);
+    }
     else if (!map_is_explored(m, mx, my))
         put(cells, cols, sx, sy, ' ', STYLE_DEFAULT);
     else
@@ -125,17 +139,27 @@ void render_message_text(const Message *m, char *out, int size)
         snprintf(out, (size_t)size, "%s", m->text);
 }
 
+/* " Depth 3   HP 12/20   Gold 45   Turn 345   Hungry Hasted   REAL TIME   ? help  i items",
+ * the warnings in the alert style. */
 static void render_status(const Game *g, Cell *cells, int cols, int row)
 {
-    char text[128];
-    snprintf(text, sizeof text,
-             " Depth %d   HP %d/%d   Turn %d   Seed %" PRIu64
-             "%s      ? help   m messages   q quit",
-             g->depth, g->player.hp, g->player.stats.hp_max, g->turn, g->seed,
-             g->realtime ? "   REAL TIME" : "");
+    static const char *const HUNGER[] = {"", "Hungry", "Weak", "Starving"};
+    const Player *p = &g->player;
+    char text[96];
+    snprintf(text, sizeof text, " Depth %d   HP %d/%d   Gold %d   Turn %d  ", g->depth, p->hp,
+             p->base.hp_max, p->gold, g->turn);
 
     render_clear(cells + row * cols, cols, 1, STYLE_STATUS);
-    render_text(cells, cols, row + 1, 0, row, text, STYLE_STATUS);
+    int x = render_text(cells, cols, row + 1, 0, row, text, STYLE_STATUS);
+    const char *alerts[] = {HUNGER[game_hunger(g)], p->haste > 0 ? "Fast" : "",
+                            p->confused > 0 ? "Confused" : "", p->blind > 0 ? "Blind" : ""};
+    for (size_t i = 0; i < sizeof alerts / sizeof alerts[0]; i++)
+        if (alerts[i][0] != '\0')
+            x = render_text(cells, cols, row + 1, x + 1, row, alerts[i], STYLE_STATUS_ALERT);
+    if (g->realtime)
+        x = render_text(cells, cols, row + 1, x + 3, row, "REAL TIME", STYLE_STATUS);
+    render_text(cells, cols, row + 1, x + 6, row, "? help   i items   m messages   q quit",
+                STYLE_STATUS);
 }
 
 /* The newest messages, oldest of them on top; bright if they came after the last action. */

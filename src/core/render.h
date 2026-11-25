@@ -22,9 +22,13 @@ typedef enum
     STYLE_MON_HUMANOID,
     STYLE_MON_UNDEAD,
     STYLE_MON_BRUTE,
+    STYLE_ITEM,      /* item in view */
+    STYLE_ITEM_SEEN, /* item remembered */
+    STYLE_GOLD,
     STYLE_STATUS,
-    STYLE_TEXT,     /* messages since the last action, screen text */
-    STYLE_TEXT_DIM, /* older messages, hints */
+    STYLE_STATUS_ALERT, /* hunger and effects on the status line */
+    STYLE_TEXT,         /* messages since the last action, screen text */
+    STYLE_TEXT_DIM,     /* older messages, hints */
     STYLE_HEADING,
     STYLE_KEY, /* key names on the help screen */
     STYLE_COUNT

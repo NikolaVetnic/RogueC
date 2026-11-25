@@ -13,7 +13,14 @@ typedef enum
     SCREEN_HELP,
     SCREEN_LOG,
     SCREEN_DEATH,
+    SCREEN_PACK, /* the inventory: choose an item to use or drop */
 } Screen;
+
+typedef enum
+{
+    PACK_USE,
+    PACK_DROP,
+} PackPurpose;
 
 /* A key is a Unicode character (Esc = 27, Enter = '\n') or one of these codes
  * for keys that type none. */
@@ -39,10 +46,12 @@ enum
 typedef struct
 {
     Screen screen;
-    int scroll;     /* message history: lines hidden below the newest shown */
-    Action pending; /* real time: pressed before the player was ready */
-    int clock_ms;   /* real time: time since the last tick */
-    bool new_game;  /* the player asked for a new game: the frontend starts one */
+    int scroll; /* message history: lines hidden below the newest shown */
+    PackPurpose pack_purpose;
+    Action pending;   /* real time: pressed before the player was ready */
+    int pending_item; /* ... and its pack item, for use and drop */
+    int clock_ms;     /* real time: time since the last tick */
+    bool new_game;    /* the player asked for a new game: the frontend starts one */
 } Ui;
 
 void ui_init(Ui *ui);

@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include "core/combat.h"
+#include "core/item.h"
 #include "core/level.h"
 #include "core/map.h"
 #include "core/msglog.h"
@@ -28,15 +29,51 @@ typedef enum
     ACTION_REST, /* wait until healed or a monster shows up */
     ACTION_DESCEND,
     ACTION_ASCEND,
+    ACTION_PICK_UP,
+    ACTION_USE,  /* an item in the pack: eat, drink, read, wield, wear or take off */
+    ACTION_DROP, /* an item in the pack */
     ACTION_QUIT,
 } Action;
+
+enum
+{
+    PACK_SIZE = 20, /* items in the pack, letters a-t */
+    NUTRITION_START = 1300,
+    NUTRITION_MAX = 2000,
+    NUTRITION_RATION = 900,
+    HUNGRY_BELOW = 300,
+    WEAK_BELOW = 100, /* and no healing */
+    STARVE_TICKS = 4, /* at 0 nutrition: 1 HP lost this often */
+};
+
+typedef enum
+{
+    HUNGER_FED,
+    HUNGER_HUNGRY,
+    HUNGER_WEAK,
+    HUNGER_STARVING,
+} Hunger;
+
+typedef enum
+{
+    DEATH_MONSTER,
+    DEATH_STARVATION,
+    DEATH_POISON,
+} DeathCause;
 
 typedef struct
 {
     Vec2 pos;
     int hp;
     int energy; /* acts at ACT_COST */
-    Stats stats;
+    Stats base; /* without gear and effects: see game_player_stats */
+    int gold;
+    int nutrition; /* -1 per tick; food adds */
+    int haste;     /* ticks left of each effect */
+    int confused;
+    int blind;
+    Item pack[PACK_SIZE];
+    int pack_count;
 } Player;
 
 enum
@@ -62,8 +99,10 @@ typedef struct
     int fov_radius;
     bool running;
     bool realtime; /* the world runs on a clock (game_tick), not on the player's moves */
-    bool dead;     /* the player died; killer says by what */
-    MonsterKind killer;
+    bool dead;
+    DeathCause death;
+    MonsterKind killer; /* if death == DEATH_MONSTER */
+    ItemLore lore;      /* item looks and what's identified */
     MsgLog log;
     int fresh_serial; /* messages from this serial on came after the last action */
 } Game;
@@ -77,14 +116,23 @@ void game_free(Game *g);
  * world then runs until the player can act again. Real time: nothing happens
  * if the player isn't ready (game_ready), and the world runs on game_tick. */
 bool game_step(Game *g, Action a);
+/* game_step for actions on a pack item (ACTION_USE, ACTION_DROP). */
+bool game_step_item(Game *g, Action a, int item);
 /* The player has the energy to act. */
 bool game_ready(const Game *g);
 /* One tick of the world: monsters act, the player gains energy and heals. */
 void game_tick(Game *g);
 void game_set_realtime(Game *g, bool on);
 Level *game_level(Game *g);
+/* The player's stats with gear and effects. */
+Stats game_player_stats(const Game *g);
+Hunger game_hunger(const Game *g);
 
 /* For ai.c: monster m (on the current level) attacks the player. */
 void game_monster_attack(Game *g, Monster *m);
+/* For inventory.c: recompute the view and announce monsters in it. */
+void game_look(Game *g);
+/* For inventory.c: the player dies of `cause` (not a monster). */
+void game_kill_player(Game *g, DeathCause cause);
 
 #endif

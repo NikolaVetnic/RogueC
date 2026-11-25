@@ -69,8 +69,35 @@ static void spawn_monsters(Level *lv, Rng *rng, int depth, const int *dist, int 
     }
 }
 
+/* A random free floor cell (no stairs, no item); false if none after many tries. */
+static bool free_floor(const Level *lv, Rng *rng, Vec2 *out)
+{
+    const Map *m = &lv->map;
+    for (int tries = 0; tries < 1000; tries++)
+    {
+        Vec2 p = vec2(rng_range(rng, 0, m->w - 1), rng_range(rng, 0, m->h - 1));
+        if (map_get(m, p.x, p.y) == TILE_FLOOR && level_item_at(lv, p) < 0)
+        {
+            *out = p;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void spawn_items(Level *lv, Rng *rng, int depth)
+{
+    Vec2 p;
+    int piles = rng_range(rng, 2, 4);
+    for (int i = 0; i < piles && free_floor(lv, rng, &p); i++)
+        level_add_item(lv, item_gold(rng, depth), p);
+    int items = 3 + depth / 3;
+    for (int i = 0; i < items && free_floor(lv, rng, &p); i++)
+        level_add_item(lv, item_random(rng, depth), p);
+}
+
 /* Up stairs on open floor; down stairs at least half the longest walk away;
- * then the monsters. */
+ * then the monsters and items. */
 static bool furnish(Level *lv, Rng *rng, int depth, int bottom)
 {
     Map *m = &lv->map;
@@ -98,7 +125,10 @@ static bool furnish(Level *lv, Rng *rng, int depth, int bottom)
     if (ok && lv->stairs_down.x >= 0)
         map_set(m, lv->stairs_down.x, lv->stairs_down.y, TILE_STAIRS_DOWN);
     if (ok)
+    {
         spawn_monsters(lv, rng, depth, dist, cells);
+        spawn_items(lv, rng, depth);
+    }
 
     free(dist);
     free(cells);
@@ -148,4 +178,26 @@ bool level_add_monster(Level *lv, Monster m)
 void level_remove_monster(Level *lv, int i)
 {
     lv->monsters[i] = lv->monsters[--lv->monster_count];
+}
+
+int level_item_at(const Level *lv, Vec2 pos)
+{
+    for (int i = 0; i < lv->item_count; i++)
+        if (vec2_eq(lv->items[i].pos, pos))
+            return i;
+    return -1;
+}
+
+bool level_add_item(Level *lv, Item it, Vec2 pos)
+{
+    if (lv->item_count >= LEVEL_MAX_ITEMS || level_item_at(lv, pos) >= 0)
+        return false;
+    it.equipped = false;
+    lv->items[lv->item_count++] = (FloorItem){.item = it, .pos = pos};
+    return true;
+}
+
+void level_remove_item(Level *lv, int i)
+{
+    lv->items[i] = lv->items[--lv->item_count];
 }

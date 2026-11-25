@@ -4,6 +4,7 @@
 
 #include "core/ai.h"
 #include "core/fov.h"
+#include "core/inventory.h"
 #include "core/path.h"
 
 enum
@@ -15,8 +16,9 @@ enum
     WANDER_SPAWN_DIST = 15,  /* ... at least this many steps away, out of view */
 };
 
+/* Bare-handed and unarmoured; gear adds to it (game_player_stats). */
 static const Stats PLAYER_STATS = {
-    .hp_max = 20, .to_hit = 2, .defense = 1, .dmg_min = 2, .dmg_max = 5, .speed = 100};
+    .hp_max = 20, .to_hit = 1, .defense = 0, .dmg_min = 1, .dmg_max = 2, .speed = 100};
 
 /* Indexed by action - ACTION_MOVE_N, clockwise from north. */
 static const Vec2 MOVE_DIR[8] = {
@@ -26,6 +28,39 @@ static const Vec2 MOVE_DIR[8] = {
 Level *game_level(Game *g)
 {
     return &g->levels[g->depth - 1];
+}
+
+Stats game_player_stats(const Game *g)
+{
+    const Player *p = &g->player;
+    Stats s = p->base;
+    for (int i = 0; i < p->pack_count; i++)
+    {
+        const Item *it = &p->pack[i];
+        if (!it->equipped)
+            continue;
+        if (it->cls == ITEM_WEAPON)
+        {
+            const WeaponInfo *w = &WEAPONS[it->kind];
+            s.to_hit += w->to_hit + it->enchant;
+            s.dmg_min = w->dmg_min + it->enchant;
+            s.dmg_max = w->dmg_max + it->enchant;
+        }
+        else if (it->cls == ITEM_ARMOUR)
+            s.defense += ARMOURS[it->kind].defense + it->enchant;
+    }
+    if (p->haste > 0)
+        s.speed *= 2;
+    return s;
+}
+
+Hunger game_hunger(const Game *g)
+{
+    int n = g->player.nutrition;
+    return n <= 0             ? HUNGER_STARVING
+           : n < WEAK_BELOW   ? HUNGER_WEAK
+           : n < HUNGRY_BELOW ? HUNGER_HUNGRY
+                              : HUNGER_FED;
 }
 
 /* ---- setup ----------------------------------------------------------------- */
@@ -52,10 +87,14 @@ static void notice_monsters(Game *g)
     }
 }
 
-static void look(Game *g)
+void game_look(Game *g)
 {
-    fov_compute(g->map, g->player.pos, g->fov_radius);
+    fov_compute(g->map, g->player.pos, g->player.blind > 0 ? 1 : g->fov_radius);
     notice_monsters(g);
+    Level *lv = game_level(g);
+    for (int i = 0; i < lv->item_count; i++)
+        if (map_is_visible(g->map, lv->items[i].pos.x, lv->items[i].pos.y))
+            lv->items[i].seen = true;
 }
 
 /* Moves the player to `pos` on level `depth` and looks around. */
@@ -66,7 +105,7 @@ static void enter_level(Game *g, int depth, Vec2 pos)
     g->player.pos = pos;
     for (int i = 0; i < game_level(g)->monster_count; i++)
         game_level(g)->monsters[i].seen = false; /* announce them again */
-    look(g);
+    game_look(g);
 }
 
 bool game_init(Game *g, uint64_t seed)
@@ -93,7 +132,26 @@ bool game_init(Game *g, uint64_t seed)
             return false;
         }
 
-    g->player = (Player){.hp = PLAYER_STATS.hp_max, .energy = ACT_COST, .stats = PLAYER_STATS};
+    g->player = (Player){.hp = PLAYER_STATS.hp_max,
+                         .energy = ACT_COST,
+                         .base = PLAYER_STATS,
+                         .nutrition = NUTRITION_START};
+    item_lore_init(&g->lore, &g->rng);
+    static const Item KIT[] = {
+        {.cls = ITEM_WEAPON,
+         .kind = WEAPON_SHORT_SWORD,
+         .count = 1,
+         .enchant_known = true,
+         .equipped = true},
+        {.cls = ITEM_ARMOUR,
+         .kind = ARMOUR_LEATHER,
+         .count = 1,
+         .enchant_known = true,
+         .equipped = true},
+        {.cls = ITEM_FOOD, .count = 1},
+    };
+    for (size_t i = 0; i < sizeof KIT / sizeof KIT[0]; i++)
+        inv_add(&g->player, KIT[i]);
     msglog_clear(&g->log);
     msglog_add(&g->log, g->turn, "You enter the dungeon. Press ? for help.");
     enter_level(g, 1, g->levels[0].stairs_up);
@@ -119,7 +177,8 @@ static void player_attack(Game *g, int i)
     const MonsterInfo *info = monster_info(m);
 
     m->awake = true;
-    int dmg = combat_attack(&g->rng, &g->player.stats, &info->stats);
+    Stats me = game_player_stats(g);
+    int dmg = combat_attack(&g->rng, &me, &info->stats);
     if (dmg == 0)
     {
         msglog_add(&g->log, g->turn, "You miss the %s.", info->name);
@@ -138,7 +197,8 @@ static void player_attack(Game *g, int i)
 void game_monster_attack(Game *g, Monster *m)
 {
     const MonsterInfo *info = monster_info(m);
-    int dmg = combat_attack(&g->rng, &info->stats, &g->player.stats);
+    Stats me = game_player_stats(g);
+    int dmg = combat_attack(&g->rng, &info->stats, &me);
     if (dmg == 0)
     {
         msglog_add(&g->log, g->turn, "The %s misses you.", info->name);
@@ -148,10 +208,43 @@ void game_monster_attack(Game *g, Monster *m)
     msglog_add(&g->log, g->turn, "The %s %s you.", info->name, info->verb);
     if (g->player.hp <= 0)
     {
-        g->player.hp = 0;
-        g->dead = true;
         g->killer = m->kind;
-        msglog_add(&g->log, g->turn, "You die.");
+        game_kill_player(g, DEATH_MONSTER);
+    }
+}
+
+void game_kill_player(Game *g, DeathCause cause)
+{
+    g->player.hp = 0;
+    g->dead = true;
+    g->death = cause;
+    msglog_add(&g->log, g->turn, "You die.");
+}
+
+/* Hunger: -1 per tick, warnings at each stage, starving costs HP. */
+static void get_hungrier(Game *g)
+{
+    Player *p = &g->player;
+    Hunger before = game_hunger(g);
+    if (p->nutrition > 0)
+        p->nutrition--;
+    Hunger now = game_hunger(g);
+    if (now != before)
+        msglog_add(&g->log, g->turn, "%s",
+                   now == HUNGER_HUNGRY ? "You are getting hungry."
+                   : now == HUNGER_WEAK ? "You feel weak from hunger."
+                                        : "You are starving!");
+    if (now == HUNGER_STARVING && g->turn % STARVE_TICKS == 0 && --p->hp <= 0)
+        game_kill_player(g, DEATH_STARVATION);
+}
+
+/* Effects wear off one tick at a time. */
+static void wear_off(Game *g, int *ticks, const char *message)
+{
+    if (*ticks > 0 && --*ticks == 0)
+    {
+        msglog_add(&g->log, g->turn, "%s", message);
+        game_look(g);
     }
 }
 
@@ -185,8 +278,14 @@ void game_tick(Game *g)
         return;
     g->turn++;
     Player *p = &g->player;
-    if (g->turn % REGEN_TURNS == 0 && p->hp < p->stats.hp_max)
+    get_hungrier(g);
+    if (g->dead)
+        return;
+    if (g->turn % REGEN_TURNS == 0 && p->hp < p->base.hp_max && game_hunger(g) < HUNGER_WEAK)
         p->hp++;
+    wear_off(g, &p->haste, "You feel yourself slow down.");
+    wear_off(g, &p->confused, "You feel less confused.");
+    wear_off(g, &p->blind, "You can see again.");
 
     bool have_dist = path_distances(g->map, p->pos, g->player_dist);
     Level *lv = game_level(g);
@@ -205,8 +304,9 @@ void game_tick(Game *g)
     notice_monsters(g);
 
     /* Can't bank more than one tick's worth: idle time in real time isn't saved up. */
-    int cap = p->stats.speed > ACT_COST ? p->stats.speed : ACT_COST;
-    p->energy += p->stats.speed;
+    int speed = game_player_stats(g).speed;
+    int cap = speed > ACT_COST ? speed : ACT_COST;
+    p->energy += speed;
     if (p->energy > cap)
         p->energy = cap;
 }
@@ -228,6 +328,8 @@ void game_set_realtime(Game *g, bool on)
 
 static bool try_move(Game *g, Vec2 dir)
 {
+    if (g->player.confused > 0 && rng_chance(&g->rng, 50))
+        dir = MOVE_DIR[rng_range(&g->rng, 0, 7)];
     Vec2 to = vec2_add(g->player.pos, dir);
     int target = level_monster_at(game_level(g), to);
     if (target >= 0)
@@ -241,6 +343,7 @@ static bool try_move(Game *g, Vec2 dir)
         return false;
     }
     g->player.pos = to;
+    inv_step_on(g);
     return true;
 }
 
@@ -276,7 +379,7 @@ static bool monster_in_view(Game *g)
 static void end_action(Game *g)
 {
     g->player.energy -= ACT_COST;
-    look(g);
+    game_look(g);
     while (!g->realtime && !g->dead && !game_ready(g))
         game_tick(g);
 }
@@ -289,21 +392,26 @@ static bool rest(Game *g)
         msglog_add(&g->log, g->turn, "You can't rest with a monster in view.");
         return false;
     }
-    if (g->player.hp >= g->player.stats.hp_max)
+    if (g->player.hp >= g->player.base.hp_max)
     {
         msglog_add(&g->log, g->turn, "You are already at full health.");
         return false;
     }
     int start = g->turn;
-    while (g->player.hp < g->player.stats.hp_max && !monster_in_view(g) && !g->dead &&
+    while (g->player.hp < g->player.base.hp_max && !monster_in_view(g) && !g->dead &&
            g->turn - start < REST_MAX)
         end_action(g);
-    if (g->player.hp == g->player.stats.hp_max)
+    if (g->player.hp == g->player.base.hp_max)
         msglog_add(&g->log, g->turn, "You rest and feel better.");
     return true;
 }
 
 bool game_step(Game *g, Action a)
+{
+    return game_step_item(g, a, -1);
+}
+
+bool game_step_item(Game *g, Action a, int item)
 {
     if (a == ACTION_NONE || g->dead)
         return false;
@@ -325,6 +433,12 @@ bool game_step(Game *g, Action a)
         return rest(g); /* acts turn by turn itself */
     else if (a == ACTION_DESCEND || a == ACTION_ASCEND)
         used_turn = take_stairs(g, a == ACTION_DESCEND ? 1 : -1);
+    else if (a == ACTION_PICK_UP)
+        used_turn = inv_pick_up(g);
+    else if (a == ACTION_USE)
+        used_turn = inv_use(g, item);
+    else if (a == ACTION_DROP)
+        used_turn = inv_drop(g, item);
 
     if (used_turn)
         end_action(g);

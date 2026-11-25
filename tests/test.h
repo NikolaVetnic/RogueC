@@ -48,5 +48,6 @@ void run_msglog_tests(void);
 void run_ui_tests(void);
 void run_dungeon_tests(void);
 void run_monster_tests(void);
+void run_item_tests(void);
 
 #endif

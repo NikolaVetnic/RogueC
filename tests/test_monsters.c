@@ -60,7 +60,7 @@ static void speed_sets_how_often_one_acts(void)
     int turn = g.turn;
     game_step(&g, ACTION_WAIT);
     CHECK(g.turn == turn + 1);
-    g.player.stats.speed = 50;
+    g.player.base.speed = 50;
     turn = g.turn;
     game_step(&g, ACTION_WAIT);
     CHECK(g.turn == turn + 2);
@@ -182,7 +182,7 @@ static void player_heals_and_rests(void)
     CHECK(g.turn == turn + 30);
 
     CHECK(game_step(&g, ACTION_REST));
-    CHECK(g.player.hp == g.player.stats.hp_max);
+    CHECK(g.player.hp == g.player.base.hp_max);
     CHECK(logged(&g, "You rest and feel better."));
 
     g.player.hp = 5;
