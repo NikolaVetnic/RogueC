@@ -17,6 +17,7 @@ int main(void)
     run_dungeon_tests();
     run_monster_tests();
     run_item_tests();
+    run_progression_tests();
 
     printf("\n%d checks, %d failed\n", test_checks, test_failures);
     return test_failures == 0 ? 0 : 1;

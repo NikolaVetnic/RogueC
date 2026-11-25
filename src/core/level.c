@@ -112,20 +112,25 @@ static bool furnish(Level *lv, Rng *rng, int depth, int bottom)
         lv->stairs_down = vec2(-1, -1);
         ok = path_distances(m, lv->stairs_up, dist);
     }
-    if (ok && depth < bottom)
+    Vec2 far_cell = vec2(-1, -1); /* the down stairs, or on the bottom level the goal */
+    if (ok)
     {
         int far = 0;
         for (size_t i = 0; i < n; i++)
             if (dist[i] > far)
                 far = dist[i];
-        lv->stairs_down = pick_cell(m, rng, dist, far / 2 > 1 ? far / 2 : 1, cells);
+        far_cell = pick_cell(m, rng, dist, far / 2 > 1 ? far / 2 : 1, cells);
     }
-    if (ok && depth > 1)
+    if (ok && depth < bottom)
+        lv->stairs_down = far_cell;
+    if (ok) /* on depth 1, the way out */
         map_set(m, lv->stairs_up.x, lv->stairs_up.y, TILE_STAIRS_UP);
     if (ok && lv->stairs_down.x >= 0)
         map_set(m, lv->stairs_down.x, lv->stairs_down.y, TILE_STAIRS_DOWN);
     if (ok)
     {
+        if (depth == bottom)
+            level_add_item(lv, (Item){.cls = ITEM_GOAL, .count = 1}, far_cell);
         spawn_monsters(lv, rng, depth, dist, cells);
         spawn_items(lv, rng, depth);
     }

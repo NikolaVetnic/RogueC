@@ -11,7 +11,7 @@ static void player_starts_on_floor_and_sees_around(void)
     {
         Game g;
         CHECK(game_init(&g, seed));
-        CHECK(map_get(g.map, g.player.pos.x, g.player.pos.y) == TILE_FLOOR);
+        CHECK(map_get(g.map, g.player.pos.x, g.player.pos.y) == TILE_STAIRS_UP); /* the way out */
         CHECK(map_is_visible(g.map, g.player.pos.x, g.player.pos.y));
         CHECK(g.running && g.turn == 0);
         game_free(&g);
@@ -145,8 +145,9 @@ static void stairs_go_both_ways_and_levels_persist(void)
     game_init(&g, 21);
     clear_monsters(&g);
     CHECK(g.depth == 1);
-    CHECK(!game_step(&g, ACTION_ASCEND)); /* depth 1: the entrance is plain floor */
-    CHECK(strcmp(msglog_get(&g.log, 0)->text, "There are no stairs up here.") == 0);
+    CHECK(!game_step(&g, ACTION_ASCEND)); /* the way out refuses you without the goal */
+    CHECK(strcmp(msglog_get(&g.log, 0)->text,
+                 "Daylight above. You won't leave without the Sunstone.") == 0);
 
     Vec2 down = g.levels[0].stairs_down;
     g.player.pos = down;

@@ -6,13 +6,14 @@
 
 #include "core/game.h"
 #include "core/render.h"
+#include "core/score.h"
 
 typedef enum
 {
     SCREEN_MAP,
     SCREEN_HELP,
     SCREEN_LOG,
-    SCREEN_DEATH,
+    SCREEN_END,  /* died or won: score and high scores */
     SCREEN_PACK, /* the inventory: choose an item to use or drop */
 } Screen;
 
@@ -48,13 +49,17 @@ typedef struct
     Screen screen;
     int scroll; /* message history: lines hidden below the newest shown */
     PackPurpose pack_purpose;
-    Action pending;   /* real time: pressed before the player was ready */
-    int pending_item; /* ... and its pack item, for use and drop */
-    int clock_ms;     /* real time: time since the last tick */
-    bool new_game;    /* the player asked for a new game: the frontend starts one */
+    Action pending;      /* real time: pressed before the player was ready */
+    int pending_item;    /* ... and its pack item, for use and drop */
+    int clock_ms;        /* real time: time since the last tick */
+    bool new_game;       /* the player asked for a new game: the frontend starts one */
+    ScoreTable *scores;  /* the frontend's high scores, or NULL */
+    bool scores_changed; /* a score was added: the frontend saves the table */
+    int score_rank;      /* this game's place in the table, or -1 */
 } Ui;
 
-void ui_init(Ui *ui);
+/* `scores` (may be NULL) gets this game's score when it ends. */
+void ui_init(Ui *ui, ScoreTable *scores);
 /* Handles one key press. The game may have stopped afterwards (g->running),
  * or ui->new_game may ask for a new one. */
 void ui_key(Ui *ui, Game *g, int key);

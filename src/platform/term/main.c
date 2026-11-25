@@ -10,6 +10,7 @@
 #include "core/game.h"
 #include "core/render.h"
 #include "core/ui.h"
+#include "platform/common/score_store.h"
 
 /* ncurses attributes for each Style, filled by init_styles. */
 static attr_t style_attr[STYLE_COUNT];
@@ -179,8 +180,10 @@ int main(int argc, char **argv)
         fprintf(stderr, "Out of memory while generating the level.\n");
         return EXIT_FAILURE;
     }
+    static ScoreTable scores;
+    score_store_load(&scores);
     Ui ui;
-    ui_init(&ui);
+    ui_init(&ui, &scores);
 
     setlocale(LC_ALL, ""); /* UTF-8 output for the wall glyph */
     initscr();
@@ -203,7 +206,7 @@ int main(int argc, char **argv)
             seed = (uint64_t)time(NULL);
             if (!game_init(&game, seed))
                 break;
-            ui_init(&ui);
+            ui_init(&ui, &scores);
         }
 
         if (cols != COLS || rows != LINES) /* first frame or terminal resized */
@@ -226,6 +229,11 @@ int main(int argc, char **argv)
         last = now;
         if (key != 0)
             ui_key(&ui, &game, key);
+        if (ui.scores_changed)
+        {
+            score_store_save(&scores);
+            ui.scores_changed = false;
+        }
     }
 
     endwin();

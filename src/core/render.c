@@ -27,6 +27,7 @@ const StyleColor STYLE_COLORS[STYLE_COUNT] = {
     [STYLE_ITEM] = {.fg = {226, 140, 226}},
     [STYLE_ITEM_SEEN] = {.fg = {110, 76, 120}},
     [STYLE_GOLD] = {.fg = {250, 226, 90}},
+    [STYLE_GOAL] = {.fg = {255, 168, 60}, .bg = {70, 40, 10}, .has_bg = true},
     [STYLE_STATUS] = {.fg = {222, 212, 192}, .bg = {50, 45, 40}, .has_bg = true},
     [STYLE_STATUS_ALERT] = {.fg = {255, 120, 100}, .bg = {50, 45, 40}, .has_bg = true},
     [STYLE_TEXT] = {.fg = {226, 220, 208}},
@@ -89,6 +90,7 @@ static void render_cell(const Game *g, Cell *cells, int cols, int sx, int sy, in
         ItemClass cls = lv->items[item].item.cls;
         Style s = !map_is_visible(m, mx, my) ? STYLE_ITEM_SEEN
                   : cls == ITEM_GOLD         ? STYLE_GOLD
+                  : cls == ITEM_GOAL         ? STYLE_GOAL
                                              : STYLE_ITEM;
         put(cells, cols, sx, sy, item_glyph(cls), s);
     }
@@ -146,8 +148,8 @@ static void render_status(const Game *g, Cell *cells, int cols, int row)
     static const char *const HUNGER[] = {"", "Hungry", "Weak", "Starving"};
     const Player *p = &g->player;
     char text[96];
-    snprintf(text, sizeof text, " Depth %d   HP %d/%d   Gold %d   Turn %d  ", g->depth, p->hp,
-             p->base.hp_max, p->gold, g->turn);
+    snprintf(text, sizeof text, " Depth %d   Lv %d   HP %d/%d   Gold %d   Turn %d  ", g->depth,
+             p->level, p->hp, p->base.hp_max, p->gold, g->turn);
 
     render_clear(cells + row * cols, cols, 1, STYLE_STATUS);
     int x = render_text(cells, cols, row + 1, 0, row, text, STYLE_STATUS);

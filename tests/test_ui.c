@@ -44,7 +44,7 @@ static void keys_move_on_the_map_screen(void)
     Game g;
     Ui ui;
     open_game(&g);
-    ui_init(&ui);
+    ui_init(&ui, NULL);
 
     ui_key(&ui, &g, 'd');
     CHECK(vec2_eq(g.player.pos, vec2(51, 20)));
@@ -64,7 +64,7 @@ static void help_opens_and_any_key_closes(void)
     Game g;
     Ui ui;
     open_game(&g);
-    ui_init(&ui);
+    ui_init(&ui, NULL);
 
     ui_key(&ui, &g, '?');
     CHECK(ui.screen == SCREEN_HELP);
@@ -87,7 +87,7 @@ static void history_shows_messages_and_scrolls(void)
     Game g;
     Ui ui;
     open_game(&g);
-    ui_init(&ui);
+    ui_init(&ui, NULL);
     for (int i = 0; i < 60; i++)
         msglog_add(&g.log, i, "Event %d", i);
 

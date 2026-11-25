@@ -91,6 +91,12 @@ bool inv_pick_up(Game *g)
     char n[NAME_SIZE];
     name(g, &g->player.pack[k], n);
     msglog_add(&g->log, g->turn, "%c - %s.", letter(k), n);
+    if (g->player.pack[k].cls == ITEM_GOAL)
+    {
+        if (g->wander_odds > GOAL_WANDER_ODDS) /* more monsters on the way back (0: none at all) */
+            g->wander_odds = GOAL_WANDER_ODDS;
+        msglog_add(&g->log, g->turn, "The dungeon stirs. Take it up to the daylight!");
+    }
     return true;
 }
 
@@ -318,6 +324,9 @@ bool inv_use(Game *g, int i)
     case ITEM_ARMOUR:
         equip(g, i);
         return true;
+    case ITEM_GOAL:
+        msglog_add(&g->log, g->turn, "%s glows warmly in your hands.", GOAL_NAME);
+        return false;
     default:
         return false;
     }

@@ -28,7 +28,7 @@ typedef struct
 typedef struct
 {
     Map map;
-    Vec2 stairs_up;   /* arrival from above; on depth 1 the entrance, plain floor */
+    Vec2 stairs_up;   /* arrival from above; on depth 1 the way out */
     Vec2 stairs_down; /* (-1, -1) on the bottom level */
     bool caves;       /* cave level, else rooms and corridors */
     Monster monsters[LEVEL_MAX_MONSTERS];
@@ -39,9 +39,9 @@ typedef struct
 
 /* Generates the level at `depth` (1 = top) of a dungeon `bottom` levels deep,
  * w x h cells, with 3 + depth monsters, 2-4 piles of gold and 3 + depth / 3
- * other items. The same seed and depth always give
- * the same level, whatever else happened in the game. Returns false if out of
- * memory (or if the map is too small for two rooms). */
+ * other items. The bottom level holds the goal, far from its stairs. The same seed and depth always
+ * give the same level, whatever else happened in the game. Returns false if out of memory (or if
+ * the map is too small for two rooms). */
 bool level_generate(Level *lv, uint64_t seed, int depth, int bottom, int w, int h);
 void level_free(Level *lv);
 

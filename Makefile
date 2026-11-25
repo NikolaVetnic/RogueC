@@ -31,10 +31,12 @@ endif
 CFLAGS := -std=c17 $(WARN) $(OPT) -MMD -MP -Isrc
 
 # core: game logic, no I/O. term: ncurses frontend. gui: raylib frontend
-# (desktop and web). Tests link the core only.
+# (desktop and web). common: shared by the frontends (high-score storage).
+# Tests link the core only.
 CORE_OBJ := $(patsubst %.c,$(OUT)/%.o,$(wildcard src/core/*.c))
 TERM_OBJ := $(patsubst %.c,$(OUT)/%.o,$(wildcard src/platform/term/*.c))
 GUI_OBJ  := $(patsubst %.c,$(OUT)/%.o,$(wildcard src/platform/raylib/*.c))
+COMMON_OBJ := $(patsubst %.c,$(OUT)/%.o,$(wildcard src/platform/common/*.c))
 TEST_OBJ := $(patsubst %.c,$(OUT)/%.o,$(wildcard tests/*.c))
 
 # raylib: the installed one (pkg-config) for desktop; for the web, the same
@@ -61,18 +63,18 @@ WEB_FLAGS := -sUSE_GLFW=3 -sALLOW_MEMORY_GROWTH=1 \
 
 all: $(OUT)/rogue                     ## build the terminal game (release)
 
-$(OUT)/rogue: $(CORE_OBJ) $(TERM_OBJ)
+$(OUT)/rogue: $(CORE_OBJ) $(TERM_OBJ) $(COMMON_OBJ)
 	$(CC) $(LDOPT) -o $@ $^ $(CURSES)
 
-$(OUT)/rogue-gui: $(CORE_OBJ) $(GUI_OBJ)
+$(OUT)/rogue-gui: $(CORE_OBJ) $(GUI_OBJ) $(COMMON_OBJ)
 	$(CC) $(LDOPT) -o $@ $^ $(RAYLIB_LIBS)
 
 $(OUT)/test_runner: $(CORE_OBJ) $(TEST_OBJ)
 	$(CC) $(LDOPT) -o $@ $^
 
-$(WEB_SITE)/index.html: $(CORE_OBJ) $(GUI_OBJ) $(RAYLIB_WEB_LIB) web/shell.html $(wildcard assets/fonts/*)
+$(WEB_SITE)/index.html: $(CORE_OBJ) $(GUI_OBJ) $(COMMON_OBJ) $(RAYLIB_WEB_LIB) web/shell.html $(wildcard assets/fonts/*)
 	@mkdir -p $(dir $@)
-	$(CC) -o $@ $(CORE_OBJ) $(GUI_OBJ) $(RAYLIB_WEB_LIB) $(OPT) $(WEB_FLAGS)
+	$(CC) -o $@ $(CORE_OBJ) $(GUI_OBJ) $(COMMON_OBJ) $(RAYLIB_WEB_LIB) $(OPT) $(WEB_FLAGS)
 
 $(OUT)/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -124,4 +126,4 @@ distclean: clean                      ## also remove fetched dependencies
 help:
 	@grep -hE '^[a-z-]+:.*##' Makefile | awk -F':.*## ' '{ printf "  make %-10s %s\n", $$1, $$2 }'
 
--include $(CORE_OBJ:.o=.d) $(TERM_OBJ:.o=.d) $(GUI_OBJ:.o=.d) $(TEST_OBJ:.o=.d)
+-include $(CORE_OBJ:.o=.d) $(TERM_OBJ:.o=.d) $(GUI_OBJ:.o=.d) $(COMMON_OBJ:.o=.d) $(TEST_OBJ:.o=.d)

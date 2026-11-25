@@ -25,6 +25,7 @@ typedef enum
     STYLE_ITEM,      /* item in view */
     STYLE_ITEM_SEEN, /* item remembered */
     STYLE_GOLD,
+    STYLE_GOAL,
     STYLE_STATUS,
     STYLE_STATUS_ALERT, /* hunger and effects on the status line */
     STYLE_TEXT,         /* messages since the last action, screen text */

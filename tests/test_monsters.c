@@ -118,14 +118,14 @@ static void monster_kills_the_player(void)
     Game g;
     Ui ui;
     open_game(&g);
-    ui_init(&ui);
+    ui_init(&ui, NULL);
     g.player.hp = 1;
     add(&g, MON_TROLL, vec2(51, 20), true);
     for (int i = 0; i < 100 && !g.dead; i++)
         ui_key(&ui, &g, '.');
     CHECK(g.dead && g.player.hp == 0 && g.killer == MON_TROLL);
     CHECK(logged(&g, "You die."));
-    CHECK(ui.screen == SCREEN_DEATH);
+    CHECK(ui.screen == SCREEN_END);
     CHECK(!game_step(&g, ACTION_WAIT));
 
     ui_render(&ui, &g, cells, COLS, ROWS);
@@ -200,7 +200,7 @@ static void real_time_runs_on_the_clock(void)
     Game g;
     Ui ui;
     open_game(&g);
-    ui_init(&ui);
+    ui_init(&ui, NULL);
     ui_key(&ui, &g, 'T');
     CHECK(g.realtime);
     int turn = g.turn;

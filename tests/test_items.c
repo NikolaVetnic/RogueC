@@ -281,7 +281,7 @@ static void pack_screen_uses_and_drops(void)
     Game g;
     Ui ui;
     open_game(&g);
-    ui_init(&ui);
+    ui_init(&ui, NULL);
 
     ui_key(&ui, &g, 'i');
     CHECK(ui.screen == SCREEN_PACK);
@@ -311,12 +311,13 @@ static void levels_have_gold_and_items(void)
         {
             Level lv;
             level_generate(&lv, seed, depth, 10, 100, 42);
-            int gold = 0, other = 0;
+            int gold = 0, other = 0, goal = 0;
             for (int i = 0; i < lv.item_count; i++)
             {
                 const FloorItem *f = &lv.items[i];
                 gold += f->item.cls == ITEM_GOLD;
-                other += f->item.cls != ITEM_GOLD;
+                other += f->item.cls != ITEM_GOLD && f->item.cls != ITEM_GOAL;
+                goal += f->item.cls == ITEM_GOAL;
                 CHECK(map_get(&lv.map, f->pos.x, f->pos.y) == TILE_FLOOR);
                 CHECK(level_item_at(&lv, f->pos) == i);
                 if (f->item.cls == ITEM_WEAPON)
@@ -324,6 +325,7 @@ static void levels_have_gold_and_items(void)
             }
             CHECK(gold >= 2 && gold <= 4);
             CHECK(other == 3 + depth / 3);
+            CHECK(goal == (depth == 10)); /* the Sunstone, on the bottom level only */
             level_free(&lv);
         }
 }

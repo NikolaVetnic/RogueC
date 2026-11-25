@@ -9,9 +9,9 @@ enum
     MAX_CATCH_UP = 4, /* real time: ticks run at most per update (after a stall) */
 };
 
-void ui_init(Ui *ui)
+void ui_init(Ui *ui, ScoreTable *scores)
 {
-    *ui = (Ui){.screen = SCREEN_MAP};
+    *ui = (Ui){.screen = SCREEN_MAP, .scores = scores, .score_rank = -1};
 }
 
 static Action action_for_key(int key)
@@ -88,10 +88,17 @@ static void pack_key(Ui *ui, Game *g, int key)
         act(ui, g, ui->pack_purpose == PACK_USE ? ACTION_USE : ACTION_DROP, i);
 }
 
+/* Once the game is over: the end screen, and the score into the table. */
 static void check_death(Ui *ui, const Game *g)
 {
-    if (g->dead)
-        ui->screen = SCREEN_DEATH;
+    if (!game_over(g) || ui->screen == SCREEN_END)
+        return;
+    ui->screen = SCREEN_END;
+    if (ui->scores)
+    {
+        ui->score_rank = scores_add(ui->scores, score_of(g));
+        ui->scores_changed = true;
+    }
 }
 
 void ui_key(Ui *ui, Game *g, int key)
@@ -131,7 +138,7 @@ void ui_key(Ui *ui, Game *g, int key)
     case SCREEN_LOG:
         log_key(ui, g, key);
         break;
-    case SCREEN_DEATH:
+    case SCREEN_END:
         if (key == '\n' || key == ' ')
             ui->new_game = true;
         else if (key == 'q' || key == 'Q' || key == 27)
@@ -212,6 +219,11 @@ static void render_help(const Game *g, Cell *cells, int cols, int rows)
     render_clear(cells, cols, rows, STYLE_DEFAULT);
     render_text(cells, cols, rows, LEFT, y, "Help", STYLE_HEADING);
     y += 2;
+    render_text(
+        cells, cols, rows, LEFT, y,
+        "Goal: find the Sunstone (*) on depth 10 and carry it out by the stairs up on depth 1.",
+        STYLE_TEXT);
+    y += 2;
     for (size_t i = 0; i < sizeof HELP_KEYS / sizeof HELP_KEYS[0]; i++, y++)
     {
         render_text(cells, cols, rows, LEFT, y, HELP_KEYS[i].what, STYLE_TEXT);
@@ -237,15 +249,16 @@ static void render_help(const Game *g, Cell *cells, int cols, int rows)
                 STYLE_TEXT);
 
     /* Items: glyph and word. */
-    static const char *const ITEM_WORDS[ITEM_CLASS_COUNT] = {"gold",   "food",   "potion",
-                                                             "scroll", "weapon", "armour"};
+    static const char *const ITEM_WORDS[ITEM_CLASS_COUNT] = {
+        "gold", "food", "potion", "scroll", "weapon", "armour", "the Sunstone: your goal"};
     int x = LEFT;
     for (int c = 0; c < ITEM_CLASS_COUNT; c++)
     {
         if (y < rows && x < cols)
-            cells[y * cols + x] =
-                (Cell){.glyph = item_glyph((ItemClass)c),
-                       .style = (uint8_t)(c == ITEM_GOLD ? STYLE_GOLD : STYLE_ITEM)};
+            cells[y * cols + x] = (Cell){.glyph = item_glyph((ItemClass)c),
+                                         .style = (uint8_t)(c == ITEM_GOLD   ? STYLE_GOLD
+                                                            : c == ITEM_GOAL ? STYLE_GOAL
+                                                                             : STYLE_ITEM)};
         x = render_text(cells, cols, rows, x + 2, y, ITEM_WORDS[c], STYLE_TEXT) + 3;
     }
     y++;
@@ -290,33 +303,46 @@ static void render_history(Ui *ui, const Game *g, Cell *cells, int cols, int row
     }
 }
 
-static void render_death(const Game *g, Cell *cells, int cols, int rows)
+/* Died or won: what happened, the score, the high-score table. */
+static void render_end(const Ui *ui, const Game *g, Cell *cells, int cols, int rows)
 {
     enum
     {
         LEFT = 2,
+        TABLE_TOP = 9,
     };
-    char text[128], cause[48];
-    MonsterKind k = g->killer;
-    if (g->death == DEATH_STARVATION)
-        snprintf(cause, sizeof cause, "Starved to death");
-    else if (g->death == DEATH_POISON)
-        snprintf(cause, sizeof cause, "Poisoned");
-    else
-        snprintf(cause, sizeof cause, "Killed by %s %s", monster_article(k), MONSTERS[k].name);
+    char text[128];
+    Score s = score_of(g);
 
     render_clear(cells, cols, rows, STYLE_DEFAULT);
-    render_text(cells, cols, rows, LEFT, 1, "You died.", STYLE_HEADING);
-    snprintf(text, sizeof text, "%s on depth %d, turn %d, with %d gold.", cause, g->depth, g->turn,
-             g->player.gold);
+    render_text(cells, cols, rows, LEFT, 1, g->won ? "You won!" : "You died.", STYLE_HEADING);
+    if (s.cause[0] >= 'a' && s.cause[0] <= 'z')
+        s.cause[0] = (char)(s.cause[0] - 'a' + 'A');
+    snprintf(text, sizeof text, "%s, turn %d, at level %d.", s.cause, g->turn, g->player.level);
     render_text(cells, cols, rows, LEFT, 3, text, STYLE_TEXT);
+    snprintf(text, sizeof text, "Score %d: %d gold + 10 x %d experience + 100 x depth %d%s.",
+             s.points, g->player.gold, g->player.xp, g->deepest,
+             g->won ? " + 2000 for the win" : "");
+    render_text(cells, cols, rows, LEFT, 4, text, STYLE_TEXT);
     snprintf(text, sizeof text, "Seed %llu", (unsigned long long)g->seed);
-    render_text(cells, cols, rows, LEFT, 4, text, STYLE_TEXT_DIM);
+    render_text(cells, cols, rows, LEFT, 5, text, STYLE_TEXT_DIM);
 
-    int x = render_text(cells, cols, rows, LEFT, 6, "Enter", STYLE_KEY);
-    x = render_text(cells, cols, rows, x, 6, ": new game    ", STYLE_TEXT);
-    x = render_text(cells, cols, rows, x, 6, "q", STYLE_KEY);
-    render_text(cells, cols, rows, x, 6, ": quit", STYLE_TEXT);
+    int x = render_text(cells, cols, rows, LEFT, 7, "Enter", STYLE_KEY);
+    x = render_text(cells, cols, rows, x, 7, ": new game    ", STYLE_TEXT);
+    x = render_text(cells, cols, rows, x, 7, "q", STYLE_KEY);
+    render_text(cells, cols, rows, x, 7, ": quit", STYLE_TEXT);
+
+    if (!ui->scores || ui->scores->count == 0)
+        return;
+    render_text(cells, cols, rows, LEFT, TABLE_TOP, "High scores", STYLE_HEADING);
+    for (int i = 0; i < ui->scores->count; i++)
+    {
+        const Score *e = &ui->scores->entries[i];
+        snprintf(text, sizeof text, "%2d. %6d  level %2d  %s", i + 1, e->points, e->level,
+                 e->cause);
+        render_text(cells, cols, rows, LEFT, TABLE_TOP + 2 + i, text,
+                    i == ui->score_rank ? STYLE_HEADING : STYLE_TEXT);
+    }
 }
 
 static void render_pack(const Ui *ui, const Game *g, Cell *cells, int cols, int rows)
@@ -368,8 +394,8 @@ void ui_render(Ui *ui, const Game *g, Cell *cells, int cols, int rows)
     case SCREEN_LOG:
         render_history(ui, g, cells, cols, rows);
         break;
-    case SCREEN_DEATH:
-        render_death(g, cells, cols, rows);
+    case SCREEN_END:
+        render_end(ui, g, cells, cols, rows);
         break;
     case SCREEN_PACK:
         render_pack(ui, g, cells, cols, rows);

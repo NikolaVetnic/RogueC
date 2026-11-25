@@ -15,8 +15,11 @@ typedef enum
     ITEM_SCROLL,
     ITEM_WEAPON,
     ITEM_ARMOUR,
+    ITEM_GOAL, /* the one thing to bring back up: GOAL_NAME */
     ITEM_CLASS_COUNT
 } ItemClass;
+
+#define GOAL_NAME "the Sunstone"
 
 typedef enum
 {

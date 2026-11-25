@@ -49,6 +49,7 @@ typedef struct
     int min_depth; /* lives on these depths */
     int max_depth;
     unsigned flags;
+    int xp; /* experience for killing one */
 } MonsterInfo;
 
 extern const MonsterInfo MONSTERS[MON_COUNT];

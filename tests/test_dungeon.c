@@ -153,7 +153,7 @@ static void levels_have_reachable_stairs(void)
             caves_mid += depth == 5 && lv.caves;
 
             Tile up = map_get(m, lv.stairs_up.x, lv.stairs_up.y);
-            CHECK(depth == 1 ? up == TILE_FLOOR : up == TILE_STAIRS_UP);
+            CHECK(up == TILE_STAIRS_UP); /* on depth 1, the way out */
 
             if (depth == BOTTOM)
             {

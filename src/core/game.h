@@ -68,6 +68,8 @@ typedef struct
     int energy; /* acts at ACT_COST */
     Stats base; /* without gear and effects: see game_player_stats */
     int gold;
+    int level; /* experience level, 1..MAX_LEVEL */
+    int xp;
     int nutrition; /* -1 per tick; food adds */
     int haste;     /* ticks left of each effect */
     int confused;
@@ -78,10 +80,14 @@ typedef struct
 
 enum
 {
-    DUNGEON_DEPTH = 10, /* levels */
-    ACT_COST = 100,     /* energy an action takes */
-    REGEN_TURNS = 10,   /* the player heals 1 HP this often */
-    REST_MAX = 500,     /* turns one rest can last */
+    DUNGEON_DEPTH = 10,     /* levels */
+    ACT_COST = 100,         /* energy an action takes */
+    REGEN_TURNS = 10,       /* the player heals 1 HP this often */
+    REST_MAX = 500,         /* turns one rest can last */
+    MAX_LEVEL = 12,         /* experience levels */
+    LEVEL_HP = 5,           /* max HP gained per level */
+    WANDER_ODDS = 300,      /* default Game.wander_odds */
+    GOAL_WANDER_ODDS = 100, /* ... once the goal is taken: the dungeon stirs */
 };
 
 /* Owns its levels: free with game_free. Copying a Game shares them. */
@@ -100,6 +106,8 @@ typedef struct
     bool running;
     bool realtime; /* the world runs on a clock (game_tick), not on the player's moves */
     bool dead;
+    bool won; /* climbed out of depth 1 with the goal */
+    int deepest;
     DeathCause death;
     MonsterKind killer; /* if death == DEATH_MONSTER */
     ItemLore lore;      /* item looks and what's identified */
@@ -120,6 +128,11 @@ bool game_step(Game *g, Action a);
 bool game_step_item(Game *g, Action a, int item);
 /* The player has the energy to act. */
 bool game_ready(const Game *g);
+/* Dead or won: nothing more happens. */
+bool game_over(const Game *g);
+/* Experience needed for `level` (1..MAX_LEVEL). */
+int game_xp_needed(int level);
+bool game_has_goal(const Game *g);
 /* One tick of the world: monsters act, the player gains energy and heals. */
 void game_tick(Game *g);
 void game_set_realtime(Game *g, bool on);

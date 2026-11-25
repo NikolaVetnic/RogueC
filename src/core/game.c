@@ -12,8 +12,7 @@ enum
     MAP_WIDTH = 100,
     MAP_HEIGHT = 42,
     FOV_RADIUS = 10,
-    WANDER_SPAWN_ODDS = 300, /* default Game.wander_odds */
-    WANDER_SPAWN_DIST = 15,  /* ... at least this many steps away, out of view */
+    WANDER_SPAWN_DIST = 15, /* ... at least this many steps away, out of view */
 };
 
 /* Bare-handed and unarmoured; gear adds to it (game_player_stats). */
@@ -30,10 +29,48 @@ Level *game_level(Game *g)
     return &g->levels[g->depth - 1];
 }
 
+/* Experience for each level: 1 needs 0, 2 needs 10, ... */
+static const int XP_NEEDED[MAX_LEVEL] = {0, 10, 25, 45, 75, 120, 180, 260, 370, 520, 720, 1000};
+
+int game_xp_needed(int level)
+{
+    return XP_NEEDED[level < 1 ? 0 : level > MAX_LEVEL ? MAX_LEVEL - 1 : level - 1];
+}
+
+static void gain_xp(Game *g, int xp)
+{
+    Player *p = &g->player;
+    p->xp += xp;
+    while (p->level < MAX_LEVEL && p->xp >= XP_NEEDED[p->level])
+    {
+        p->level++;
+        p->base.hp_max += LEVEL_HP;
+        p->hp += LEVEL_HP;
+        msglog_add(&g->log, g->turn, "Welcome to level %d.", p->level);
+    }
+}
+
+bool game_has_goal(const Game *g)
+{
+    for (int i = 0; i < g->player.pack_count; i++)
+        if (g->player.pack[i].cls == ITEM_GOAL)
+            return true;
+    return false;
+}
+
+bool game_over(const Game *g)
+{
+    return g->dead || g->won;
+}
+
+/* Base stats, + 1 to hit per level and + 1 damage every second level,
+ * + wielded weapon (its damage replaces bare hands) and worn armour, + haste. */
 Stats game_player_stats(const Game *g)
 {
     const Player *p = &g->player;
     Stats s = p->base;
+    int dmg_bonus = (p->level - 1) / 2;
+    s.to_hit += p->level - 1;
     for (int i = 0; i < p->pack_count; i++)
     {
         const Item *it = &p->pack[i];
@@ -49,6 +86,8 @@ Stats game_player_stats(const Game *g)
         else if (it->cls == ITEM_ARMOUR)
             s.defense += ARMOURS[it->kind].defense + it->enchant;
     }
+    s.dmg_min += dmg_bonus;
+    s.dmg_max += dmg_bonus;
     if (p->haste > 0)
         s.speed *= 2;
     return s;
@@ -101,6 +140,8 @@ void game_look(Game *g)
 static void enter_level(Game *g, int depth, Vec2 pos)
 {
     g->depth = depth;
+    if (depth > g->deepest)
+        g->deepest = depth;
     g->map = &g->levels[depth - 1].map;
     g->player.pos = pos;
     for (int i = 0; i < game_level(g)->monster_count; i++)
@@ -110,8 +151,8 @@ static void enter_level(Game *g, int depth, Vec2 pos)
 
 bool game_init(Game *g, uint64_t seed)
 {
-    *g = (Game){
-        .seed = seed, .fov_radius = FOV_RADIUS, .wander_odds = WANDER_SPAWN_ODDS, .running = true};
+    *g =
+        (Game){.seed = seed, .fov_radius = FOV_RADIUS, .wander_odds = WANDER_ODDS, .running = true};
     rng_seed(&g->rng, seed);
 
     g->levels = calloc(DUNGEON_DEPTH, sizeof *g->levels);
@@ -135,6 +176,7 @@ bool game_init(Game *g, uint64_t seed)
     g->player = (Player){.hp = PLAYER_STATS.hp_max,
                          .energy = ACT_COST,
                          .base = PLAYER_STATS,
+                         .level = 1,
                          .nutrition = NUTRITION_START};
     item_lore_init(&g->lore, &g->rng);
     static const Item KIT[] = {
@@ -190,6 +232,7 @@ static void player_attack(Game *g, int i)
     else
     {
         msglog_add(&g->log, g->turn, "You kill the %s.", info->name);
+        gain_xp(g, info->xp);
         level_remove_monster(lv, i);
     }
 }
@@ -274,14 +317,17 @@ static void maybe_spawn_wanderer(Game *g)
 
 void game_tick(Game *g)
 {
-    if (g->dead)
+    if (game_over(g))
         return;
     g->turn++;
     Player *p = &g->player;
     get_hungrier(g);
     if (g->dead)
         return;
-    if (g->turn % REGEN_TURNS == 0 && p->hp < p->base.hp_max && game_hunger(g) < HUNGER_WEAK)
+    int regen = REGEN_TURNS + 1 - p->level; /* 10 at level 1, faster with levels */
+    if (regen < 3)
+        regen = 3;
+    if (g->turn % regen == 0 && p->hp < p->base.hp_max && game_hunger(g) < HUNGER_WEAK)
         p->hp++;
     wear_off(g, &p->haste, "You feel yourself slow down.");
     wear_off(g, &p->confused, "You feel less confused.");
@@ -313,7 +359,7 @@ void game_tick(Game *g)
 
 bool game_ready(const Game *g)
 {
-    return !g->dead && g->player.energy >= ACT_COST;
+    return !game_over(g) && g->player.energy >= ACT_COST;
 }
 
 void game_set_realtime(Game *g, bool on)
@@ -357,6 +403,18 @@ static bool take_stairs(Game *g, int dir)
         return false;
     }
 
+    if (dir < 0 && g->depth == 1) /* the way out */
+    {
+        if (!game_has_goal(g))
+        {
+            msglog_add(&g->log, g->turn, "Daylight above. You won't leave without %s.", GOAL_NAME);
+            return false;
+        }
+        g->won = true;
+        msglog_add(&g->log, g->turn, "You climb out into the daylight with %s!", GOAL_NAME);
+        return true;
+    }
+
     int depth = g->depth + dir;
     const Level *to = &g->levels[depth - 1];
     msglog_add(&g->log, g->turn, dir > 0 ? "You go down to depth %d." : "You climb up to depth %d.",
@@ -380,7 +438,7 @@ static void end_action(Game *g)
 {
     g->player.energy -= ACT_COST;
     game_look(g);
-    while (!g->realtime && !g->dead && !game_ready(g))
+    while (!g->realtime && !game_over(g) && !game_ready(g))
         game_tick(g);
 }
 
@@ -413,7 +471,7 @@ bool game_step(Game *g, Action a)
 
 bool game_step_item(Game *g, Action a, int item)
 {
-    if (a == ACTION_NONE || g->dead)
+    if (a == ACTION_NONE || game_over(g))
         return false;
     g->fresh_serial = msglog_next_serial(&g->log); /* earlier messages are now old */
     if (a == ACTION_QUIT)

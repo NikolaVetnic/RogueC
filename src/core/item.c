@@ -111,7 +111,7 @@ bool item_stacks(const Item *a, const Item *b)
 
 uint32_t item_glyph(ItemClass cls)
 {
-    static const char GLYPHS[ITEM_CLASS_COUNT] = {'$', '%', '!', '?', ')', '['};
+    static const char GLYPHS[ITEM_CLASS_COUNT] = {'$', '%', '!', '?', ')', '[', '*'};
     return (uint32_t)GLYPHS[cls];
 }
 
@@ -214,6 +214,9 @@ void item_name(const ItemLore *lore, const Item *it, char *out, int size)
         break;
     case ITEM_ARMOUR:
         snprintf(out, n, "%s%s%s", ench, ARMOURS[it->kind].name, it->equipped ? " (worn)" : "");
+        break;
+    case ITEM_GOAL:
+        snprintf(out, n, GOAL_NAME);
         break;
     default:
         snprintf(out, n, "something");

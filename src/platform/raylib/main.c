@@ -17,6 +17,7 @@
 #include "core/game.h"
 #include "core/render.h"
 #include "core/ui.h"
+#include "platform/common/score_store.h"
 
 #define FONT_FILE "assets/fonts/JetBrainsMono-Regular.ttf"
 /* raylib's font size is the line height (ascent + descent), in logical pixels;
@@ -29,6 +30,7 @@ typedef struct
 {
     Game game;
     Ui ui;
+    ScoreTable scores;
     Font font;
     float scale;     /* drawing units per logical pixel: devicePixelRatio on the web, else 1 */
     float font_size; /* FONT_SIZE * scale */
@@ -230,11 +232,16 @@ static void frame(void *arg)
 #endif
     handle_input(app);
     ui_update(&app->ui, &app->game, (int)(GetFrameTime() * 1000.0f));
+    if (app->ui.scores_changed)
+    {
+        score_store_save(&app->scores);
+        app->ui.scores_changed = false;
+    }
     if (app->ui.new_game) /* from the death screen */
     {
         game_free(&app->game);
         app->quit = !game_init(&app->game, (uint64_t)time(NULL));
-        ui_init(&app->ui);
+        ui_init(&app->ui, &app->scores);
     }
 
 #ifdef __EMSCRIPTEN__
@@ -242,7 +249,7 @@ static void frame(void *arg)
     {
         game_free(&app->game);
         app->quit = !game_init(&app->game, (uint64_t)time(NULL));
-        ui_init(&app->ui);
+        ui_init(&app->ui, &app->scores);
     }
     if (app->quit || !fit_grid(app))
     {
@@ -304,7 +311,8 @@ int main(int argc, char **argv)
 #else
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_WINDOW_HIGHDPI | FLAG_VSYNC_HINT);
 #endif
-    ui_init(&app.ui);
+    score_store_load(&app.scores);
+    ui_init(&app.ui, &app.scores);
     InitWindow(800, 600, "RogueC");
     SetExitKey(KEY_NULL); /* Esc doesn't close the game */
 
