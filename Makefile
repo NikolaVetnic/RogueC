@@ -59,7 +59,7 @@ WEB_SITE  := build/www
 WEB_FLAGS := -sUSE_GLFW=3 -sALLOW_MEMORY_GROWTH=1 \
              --preload-file assets/fonts@assets/fonts --shell-file web/shell.html
 
-.PHONY: all run gui run-gui web serve deps debug test leaks format clean distclean help
+.PHONY: all run gui run-gui web serve pages deps debug test leaks format clean distclean help
 
 all: $(OUT)/rogue                     ## build the terminal game (release)
 
@@ -102,6 +102,17 @@ web:                                  ## build the browser version into build/ww
 
 serve: web                            ## build the browser version and serve it on localhost:8000
 	python3 -m http.server 8000 --directory $(WEB_SITE)
+
+pages: web                            ## commit build/www to the gh-pages branch (push it to deploy)
+	touch $(WEB_SITE)/.nojekyll
+	rm -f build/pages.index
+	GIT_INDEX_FILE=build/pages.index git --work-tree=$(WEB_SITE) add -A .
+	tree=$$(GIT_INDEX_FILE=build/pages.index git write-tree) && \
+	parent=$$(git rev-parse -q --verify gh-pages) ; \
+	commit=$$(git commit-tree $$tree $${parent:+-p $$parent} -m "Browser build of $$(git rev-parse --short HEAD)") && \
+	git update-ref refs/heads/gh-pages $$commit && \
+	echo "gh-pages updated; deploy with: git push origin gh-pages"
+	rm -f build/pages.index
 
 debug:                                ## build with ASan + UBSan
 	$(MAKE) MODE=debug

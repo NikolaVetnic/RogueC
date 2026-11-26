@@ -2,6 +2,8 @@
 
 A roguelike in C. Go down ten levels, find the Sunstone and carry it back up to the daylight. A procedurally generated dungeon (rooms and corridors at the top, caves below), monsters that hunt you, unidentified potions and scrolls, weapons, armour and hunger, ray-cast line of sight with fog of war, permadeath, and a choice of turn-based or real-time play. Plays in the terminal, in a desktop window, and in the browser (WebAssembly).
 
+**Play in the browser: https://nikolavetnic.github.io/RogueC/**
+
 ![RogueC, 2022 version](gif/line-of-sight.gif)
 
 *The 2022 version. Visible cells are now drawn bright and remembered cells dim.*
@@ -22,7 +24,7 @@ make test                      # unit tests with AddressSanitizer + UndefinedBeh
 make help                      # all targets
 ```
 
-Any terminal or window size works; the view follows the player. `make web` writes a static site to `build/www/` (index.html, .js, .wasm, .data) that any web server can host.
+Any terminal or window size works; the view follows the player. `make web` writes a static site to `build/www/` (index.html, .js, .wasm, .data) that any web server can host. `make pages` commits that site to the `gh-pages` branch; `git push origin gh-pages` deploys it to GitHub Pages.
 
 ## Controls
 
