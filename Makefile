@@ -105,14 +105,14 @@ serve: web                            ## build the browser version and serve it 
 
 pages: web                            ## commit build/www to the gh-pages branch (push it to deploy)
 	touch $(WEB_SITE)/.nojekyll
-	rm -f build/pages.index
-	GIT_INDEX_FILE=build/pages.index git --work-tree=$(WEB_SITE) add -A .
-	tree=$$(GIT_INDEX_FILE=build/pages.index git write-tree) && \
+	rm -f $(CURDIR)/build/pages.index
+	GIT_INDEX_FILE=$(CURDIR)/build/pages.index git --work-tree=$(WEB_SITE) add -A .
+	tree=$$(GIT_INDEX_FILE=$(CURDIR)/build/pages.index git write-tree) && \
 	parent=$$(git rev-parse -q --verify gh-pages) ; \
 	commit=$$(git commit-tree $$tree $${parent:+-p $$parent} -m "Browser build of $$(git rev-parse --short HEAD)") && \
 	git update-ref refs/heads/gh-pages $$commit && \
 	echo "gh-pages updated; deploy with: git push origin gh-pages"
-	rm -f build/pages.index
+	rm -f $(CURDIR)/build/pages.index
 
 debug:                                ## build with ASan + UBSan
 	$(MAKE) MODE=debug
