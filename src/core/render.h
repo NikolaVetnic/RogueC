@@ -31,7 +31,8 @@ typedef enum
     STYLE_TEXT,         /* messages since the last action, screen text */
     STYLE_TEXT_DIM,     /* older messages, hints */
     STYLE_HEADING,
-    STYLE_KEY, /* key names on the help screen */
+    STYLE_KEY,    /* key names on the help screen */
+    STYLE_BUTTON, /* touch buttons */
     STYLE_COUNT
 } Style;
 
@@ -68,12 +69,24 @@ typedef struct
 {
     int log_lines; /* messages above the map */
     bool can_exit; /* the key hint says "q save & quit", else "q save" */
+    bool no_hints; /* no key hints on the status line (touch buttons instead) */
 } MapView;
+
+/* Where render_game puts things on a cols x rows screen. */
+typedef struct
+{
+    int log_rows;   /* messages on rows 0 .. log_rows - 1 */
+    int map_rows;   /* the map on the rows after them */
+    Vec2 camera;    /* the map cell shown at the map's top left corner */
+    int status_row; /* -1: none */
+} MapLayout;
+
+MapLayout render_map_layout(const Game *g, int cols, int rows, MapView view);
 
 /* Map screen: fills cells[rows * cols] (row-major) with the map centred on the
  * player, the view.log_lines newest messages on top when there are at least
- * 8 + log_lines rows, and a status line on the last row when there are at
- * least two. */
+ * 8 + log_lines rows (long ones wrapped), and a status line on the last row
+ * when there are at least two. */
 void render_game(const Game *g, Cell *cells, int cols, int rows, MapView view);
 
 /* The style a monster kind is drawn in. */
@@ -83,6 +96,13 @@ Style render_monster_style(MonsterKind kind);
 void render_clear(Cell *cells, int cols, int rows, Style style);
 /* Writes ASCII text from (x, y), cut at the right edge; returns the column after it. */
 int render_text(Cell *cells, int cols, int rows, int x, int y, const char *text, Style style);
+/* Writes text from (x, y), wrapped at spaces to fit the screen width, each line
+ * starting at column x; returns the row after it. */
+int render_wrapped(Cell *cells, int cols, int rows, int x, int y, const char *text, Style style);
+/* Splits text into lines of at most `width` characters, breaking at spaces
+ * (or inside a word longer than a line): start[i] and len[i] for each line.
+ * Returns the number of lines, at most `max`. */
+int render_wrap(const char *text, int width, int *start, int *len, int max);
 /* Message text with its repeat count, e.g. "Rock blocks the way. (x3)". */
 void render_message_text(const Message *m, char *out, int size);
 

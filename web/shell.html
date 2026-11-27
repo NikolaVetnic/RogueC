@@ -5,9 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RogueC</title>
   <style>
-    html, body { margin: 0; height: 100%; overflow: hidden; background: #0c0c10; }
-    /* !important: beats the inline size the runtime sets; the game reads this size */
-    canvas { display: block; outline: none; width: 100vw !important; height: 100vh !important; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #0c0c10; overscroll-behavior: none; }
+    /* !important: beats the inline size the runtime sets; the game reads this size.
+       dvh: the height left by a phone's browser bars. touch-action: taps go to the
+       game, no zooming or scrolling; no text selection or tap highlight either. */
+    canvas {
+      display: block; outline: none; width: 100vw !important; height: 100vh !important;
+      touch-action: none; user-select: none; -webkit-user-select: none;
+      -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+    }
+    @supports (height: 100dvh) { canvas { height: 100dvh !important; } }
     #status {
       position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
       color: #aaa; font: 16px ui-monospace, monospace; pointer-events: none;

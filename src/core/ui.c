@@ -1,6 +1,7 @@
 #include "core/ui.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 enum
@@ -83,8 +84,9 @@ static void log_key(Ui *ui, const Game *g, int key)
 }
 
 /* Turn-based, or ready: act now. Real time and not ready: keep the latest
- * move for when the player is (quitting never waits). */
-static void act(Ui *ui, Game *g, Action a, int item)
+ * move for when the player is (quitting never waits). `item` is for use and
+ * drop, `target` for travel. */
+static void act_at(Ui *ui, Game *g, Action a, int item, Vec2 target)
 {
     if (a == ACTION_NONE)
         return;
@@ -92,12 +94,40 @@ static void act(Ui *ui, Game *g, Action a, int item)
     {
         ui->pending = a;
         ui->pending_item = item;
+        ui->pending_target = target;
     }
     else
     {
         ui->pending = ACTION_NONE;
-        game_step_item(g, a, item);
+        if (a == ACTION_TRAVEL)
+            game_travel(g, target);
+        else
+            game_step_item(g, a, item);
     }
+}
+
+static void act(Ui *ui, Game *g, Action a, int item)
+{
+    act_at(ui, g, a, item, vec2(0, 0));
+}
+
+/* The stairs button, towards the goal: down, or up once carrying it. Walks to
+ * the known stairs; on them, takes them. */
+static void stairs(Ui *ui, Game *g)
+{
+    bool up = game_has_goal(g);
+    Vec2 at = g->player.pos;
+    if (map_get(g->map, at.x, at.y) == (up ? TILE_STAIRS_UP : TILE_STAIRS_DOWN))
+    {
+        act(ui, g, up ? ACTION_ASCEND : ACTION_DESCEND, -1);
+        return;
+    }
+    Vec2 to = up ? game_level(g)->stairs_up : game_level(g)->stairs_down;
+    if (to.x >= 0 && map_is_explored(g->map, to.x, to.y))
+        act_at(ui, g, ACTION_TRAVEL, -1, to);
+    else
+        msglog_add(&g->log, g->turn, "You haven't found the stairs %s here yet.",
+                   up ? "up" : "down");
 }
 
 /* A pack letter: use or drop that item, back to the map. Other keys: back. */
@@ -193,6 +223,12 @@ static void change_option(Ui *ui, int step)
 
 static void options_key(Ui *ui, int key)
 {
+    if (key >= UI_KEY_ROW && key < UI_KEY_ROW + option_count(ui)) /* a tap on a line */
+    {
+        ui->option_row = key - UI_KEY_ROW;
+        change_option(ui, 1);
+        return;
+    }
     // clang-format off
     switch (key)
     {
@@ -208,6 +244,38 @@ static void options_key(Ui *ui, int key)
         ui->screen = SCREEN_MAP; break;
     }
     // clang-format on
+}
+
+/* ---- the touch menu ------------------------------------------------------- */
+
+typedef struct
+{
+    int key; /* the map screen's key for it */
+    const char *label;
+} MenuEntry;
+
+static int menu_entries(const Ui *ui, const Game *g, MenuEntry out[6])
+{
+    int n = 0;
+    out[n++] = (MenuEntry){'?', "Help"};
+    out[n++] = (MenuEntry){'m', "Message history"};
+    if (ui->settings)
+        out[n++] = (MenuEntry){'o', "Options"};
+    out[n++] = (MenuEntry){'T', g->realtime ? "Switch to turn-based" : "Switch to real time"};
+    out[n++] = (MenuEntry){'q', ui->can_exit ? "Save and quit" : "Save"};
+    out[n++] = (MenuEntry){'Q', "Give up this game"};
+    return n;
+}
+
+/* An entry's key does what it does on the map screen; any other key goes back. */
+static void menu_key(Ui *ui, Game *g, int key)
+{
+    MenuEntry e[6];
+    int n = menu_entries(ui, g, e);
+    ui->screen = SCREEN_MAP;
+    for (int i = 0; i < n; i++)
+        if (e[i].key == key)
+            ui_key(ui, g, key);
 }
 
 void ui_key(Ui *ui, Game *g, int key)
@@ -242,6 +310,10 @@ void ui_key(Ui *ui, Game *g, int key)
             ui->screen = SCREEN_OPTIONS;
             ui->option_row = 0;
         }
+        else if (key == UI_KEY_MENU)
+            ui->screen = SCREEN_MENU;
+        else if (key == UI_KEY_STAIRS)
+            stairs(ui, g);
         else if (key == 'q')
             save_and_quit(ui, g);
         else if (key == 'Q')
@@ -263,6 +335,9 @@ void ui_key(Ui *ui, Game *g, int key)
     case SCREEN_OPTIONS:
         options_key(ui, key);
         break;
+    case SCREEN_MENU:
+        menu_key(ui, g, key);
+        break;
     case SCREEN_HELP:
         ui->screen = SCREEN_MAP; /* any key */
         break;
@@ -276,6 +351,95 @@ void ui_key(Ui *ui, Game *g, int key)
             g->running = false;
         break;
     }
+}
+
+/* ---- taps ------------------------------------------------------------------- */
+
+static bool known_floor(const Map *m, Vec2 c)
+{
+    return map_walkable(m, c.x, c.y) && map_is_explored(m, c.x, c.y);
+}
+
+static int chebyshev(Vec2 a, Vec2 b)
+{
+    int dx = abs(a.x - b.x), dy = abs(a.y - b.y);
+    return dx > dy ? dx : dy;
+}
+
+/* A tap on the map: on the player, pick up, take the stairs or wait; next to
+ * the player, step or attack; further, walk there. */
+static void map_tap(Ui *ui, Game *g, int x, int y)
+{
+    static const Vec2 DIRS[8] = {{0, -1}, {1, -1}, {1, 0},  {1, 1},
+                                 {0, 1},  {-1, 1}, {-1, 0}, {-1, -1}}; /* as ACTION_MOVE_* */
+    const MapLayout *l = &ui->map_layout;
+    if (y < l->log_rows || y >= l->log_rows + l->map_rows)
+        return;
+    Vec2 cell = vec2(l->camera.x + x, l->camera.y + y - l->log_rows);
+    Vec2 at = g->player.pos;
+
+    if (vec2_eq(cell, at))
+    {
+        Tile here = map_get(g->map, at.x, at.y);
+        act(ui, g,
+            level_item_at(game_level(g), at) >= 0 ? ACTION_PICK_UP
+            : here == TILE_STAIRS_DOWN            ? ACTION_DESCEND
+            : here == TILE_STAIRS_UP              ? ACTION_ASCEND
+                                                  : ACTION_WAIT,
+            -1);
+        return;
+    }
+    for (int d = 0; d < 8; d++)
+        if (vec2_eq(cell, vec2_add(at, DIRS[d])))
+        {
+            act(ui, g, (Action)(ACTION_MOVE_N + d), -1);
+            return;
+        }
+
+    /* A near miss (rock, the unknown): the known floor beside it nearest the player. */
+    if (!known_floor(g->map, cell))
+    {
+        Vec2 best = cell;
+        for (int d = 0; d < 8; d++)
+        {
+            Vec2 n = vec2_add(cell, DIRS[d]);
+            if (known_floor(g->map, n) &&
+                (vec2_eq(best, cell) || chebyshev(n, at) < chebyshev(best, at)))
+                best = n;
+        }
+        cell = best;
+    }
+    act_at(ui, g, ACTION_TRAVEL, -1, cell);
+}
+
+void ui_tap(Ui *ui, Game *g, int x, int y)
+{
+    if (ui->last_depth == 0)
+        ui->last_depth = g->depth;
+    Screen before = ui->screen;
+    const UiTarget *hit = NULL;
+    for (int i = 0; i < ui->target_count; i++)
+    {
+        const UiTarget *t = &ui->targets[i];
+        if (x >= t->x && x < t->x + t->w && y >= t->y && y < t->y + t->h)
+            hit = t;
+    }
+
+    if (ui->screen == SCREEN_MAP && game_run_active(g))
+        ui_key(ui, g, UI_KEY_OTHER); /* stops it, and only that */
+    else if (hit)
+        ui_key(ui, g, hit->key);
+    else if (ui->screen == SCREEN_HELP)
+        ui_key(ui, g, UI_KEY_OTHER);
+    else if (ui->screen == SCREEN_MAP && ui->confirm_abandon)
+        ui_key(ui, g, 'n');
+    else if (ui->screen == SCREEN_MAP)
+    {
+        map_tap(ui, g, x, y);
+        check_game(ui, g);
+    }
+    if (ui->screen != before)
+        ui->target_count = 0; /* until the new screen is drawn */
 }
 
 void ui_update(Ui *ui, Game *g, int elapsed_ms)
@@ -297,13 +461,71 @@ void ui_update(Ui *ui, Game *g, int elapsed_ms)
         if (game_run_active(g))
             game_run_continue(g);
         else if (ui->pending != ACTION_NONE && game_ready(g))
-            act(ui, g, ui->pending, ui->pending_item);
+            act_at(ui, g, ui->pending, ui->pending_item, ui->pending_target);
         if (ui->clock_ms < tick_ms || g->dead)
             break;
         ui->clock_ms -= tick_ms;
         game_tick(g);
     }
     check_game(ui, g);
+}
+
+/* ---- touch buttons ------------------------------------------------------------ */
+
+typedef struct
+{
+    const char *label;
+    const char *short_label; /* when the label doesn't fit; NULL: cut it */
+    int key;
+} Button;
+
+static void add_target(Ui *ui, int x, int y, int w, int h, int key)
+{
+    if (ui->target_count < UI_TARGETS_MAX && w > 0 && h > 0)
+        ui->targets[ui->target_count++] = (UiTarget){.x = x, .y = y, .w = w, .h = h, .key = key};
+}
+
+/* Rows the button bar takes on a screen of `rows` (odd, so labels sit in the
+ * middle); 0 without touch. */
+static int bar_rows(const Ui *ui, int rows)
+{
+    if (!ui->touch || rows < 6)
+        return 0;
+    return rows >= 15 ? 3 : 1;
+}
+
+/* A w x h button with its label centred, and its tap target. */
+static void render_button(Ui *ui, Cell *cells, int cols, int rows, int x, int y, int w, int h,
+                          const Button *b)
+{
+    for (int r = y; r < y + h && r < rows; r++)
+        for (int c = x; c < x + w && c < cols; c++)
+            cells[r * cols + c] = (Cell){.glyph = ' ', .style = STYLE_BUTTON};
+    const char *label = b->short_label && (int)strlen(b->label) > w ? b->short_label : b->label;
+    char text[48];
+    snprintf(text, sizeof text, "%.*s", w > 0 ? w : 0, label);
+    render_text(cells, cols, rows, x + (w - (int)strlen(text)) / 2, y + (h - 1) / 2, text,
+                STYLE_BUTTON);
+    add_target(ui, x, y, w, h, b->key);
+}
+
+/* Buttons sharing the bottom h rows, one column apart. */
+static void render_bar(Ui *ui, Cell *cells, int cols, int rows, int h, const Button *b, int n)
+{
+    if (h <= 0 || h > rows)
+        return;
+    render_clear(cells + (rows - h) * cols, cols, h, STYLE_DEFAULT);
+    for (int i = 0; i < n; i++)
+    {
+        int x0 = i * (cols + 1) / n, x1 = (i + 1) * (cols + 1) / n - 1;
+        render_button(ui, cells, cols, rows, x0, rows - h, x1 - x0, h, &b[i]);
+    }
+}
+
+/* Lines per list entry: two (easier to tap) if they fit in `space` rows. */
+static int entry_rows(const Ui *ui, int count, int space)
+{
+    return ui->touch && count * 2 <= space ? 2 : 1;
 }
 
 /* ---- screens -------------------------------------------------------------- */
@@ -333,6 +555,21 @@ static const struct
 
 static const struct
 {
+    const char *what;
+    const char *does;
+} HELP_TOUCH[] = {
+    {"Tap a place", "walk there (stops when something happens)"},
+    {"Tap next to you", "step there, or attack a monster"},
+    {"Tap yourself", "pick up what is here, take the stairs, or wait a turn"},
+    {"Tap the messages", "message history"},
+    {"Items, Drop", "then tap the item"},
+    {"Stairs", "walk to the stairs down (up with the Sunstone); again to take them"},
+    {"Rest", "rest until healed"},
+    {"Menu", "help, options, real time, save, give up"},
+};
+
+static const struct
+{
     uint32_t glyph;
     Style style;
     const char *what;
@@ -358,19 +595,31 @@ static void render_help(const Ui *ui, const Game *g, Cell *cells, int cols, int 
     render_clear(cells, cols, rows, STYLE_DEFAULT);
     render_text(cells, cols, rows, LEFT, y, "Help", STYLE_HEADING);
     y += 2;
-    render_text(
+    y = render_wrapped(
         cells, cols, rows, LEFT, y,
         "Goal: find the Sunstone (*) on depth 10 and carry it out by the stairs up on depth 1.",
         STYLE_TEXT);
-    y += 2;
-    for (size_t i = 0; i < sizeof HELP_KEYS / sizeof HELP_KEYS[0]; i++, y++)
-    {
-        const char *what = HELP_KEYS[i].what;
-        if (!ui->can_exit && strcmp(what, "Save and quit") == 0)
-            what = "Save (closing the tab saves too)";
-        render_text(cells, cols, rows, LEFT, y, what, STYLE_TEXT);
-        render_text(cells, cols, rows, KEYS_X, y, HELP_KEYS[i].keys, STYLE_KEY);
-    }
+    y++;
+    if (ui->touch) /* what taps and buttons do; side by side if there is room */
+        for (size_t i = 0; i < sizeof HELP_TOUCH / sizeof HELP_TOUCH[0]; i++, y++)
+        {
+            render_text(cells, cols, rows, LEFT, y, HELP_TOUCH[i].what, STYLE_KEY);
+            if (cols >= KEYS_X + 30)
+                render_text(cells, cols, rows, KEYS_X, y, HELP_TOUCH[i].does, STYLE_TEXT);
+            else
+                y = render_wrapped(cells, cols, rows, LEFT + 2, y + 1, HELP_TOUCH[i].does,
+                                   STYLE_TEXT) -
+                    1;
+        }
+    else
+        for (size_t i = 0; i < sizeof HELP_KEYS / sizeof HELP_KEYS[0]; i++, y++)
+        {
+            const char *what = HELP_KEYS[i].what;
+            if (!ui->can_exit && strcmp(what, "Save and quit") == 0)
+                what = "Save (closing the tab saves too)";
+            render_text(cells, cols, rows, LEFT, y, what, STYLE_TEXT);
+            render_text(cells, cols, rows, KEYS_X, y, HELP_KEYS[i].keys, STYLE_KEY);
+        }
 
     y++;
     render_text(cells, cols, rows, LEFT, y++, "Map", STYLE_HEADING);
@@ -408,7 +657,8 @@ static void render_help(const Ui *ui, const Game *g, Cell *cells, int cols, int 
     char seed[48];
     snprintf(seed, sizeof seed, "Seed %llu", (unsigned long long)g->seed);
     render_text(cells, cols, rows, LEFT, y + 1, seed, STYLE_TEXT_DIM);
-    render_text(cells, cols, rows, LEFT, y + 2, "Press any key to go back.", STYLE_TEXT_DIM);
+    render_text(cells, cols, rows, LEFT, y + 2,
+                ui->touch ? "Tap to go back." : "Press any key to go back.", STYLE_TEXT_DIM);
 }
 
 /* Messages oldest first, the newest last; ui->scroll lines up from it. */
@@ -428,7 +678,9 @@ static void render_history(Ui *ui, const Game *g, Cell *cells, int cols, int row
     render_clear(cells, cols, rows, STYLE_DEFAULT);
     render_text(cells, cols, rows, LEFT, 0, "Message history", STYLE_HEADING);
     render_text(cells, cols, rows, LEFT, 1,
-                "Up/Down, PgUp/PgDn, Home/End scroll; any other key goes back.", STYLE_TEXT_DIM);
+                ui->touch ? "Older and Newer scroll."
+                          : "Up/Down, PgUp/PgDn, Home/End scroll; any other key goes back.",
+                STYLE_TEXT_DIM);
 
     render_text(cells, cols, rows, LEFT, TOP - 1, " Turn  Message", STYLE_TEXT_DIM);
     int shown = count < lines ? count : lines; /* a short history starts at the top */
@@ -451,7 +703,6 @@ static void render_end(const Ui *ui, const Game *g, Cell *cells, int cols, int r
     enum
     {
         LEFT = 2,
-        TABLE_TOP = 9,
     };
     char text[128];
     Score s = score_of(g);
@@ -461,33 +712,38 @@ static void render_end(const Ui *ui, const Game *g, Cell *cells, int cols, int r
     if (s.cause[0] >= 'a' && s.cause[0] <= 'z')
         s.cause[0] = (char)(s.cause[0] - 'a' + 'A');
     snprintf(text, sizeof text, "%s, turn %d, at level %d.", s.cause, g->turn, g->player.level);
-    render_text(cells, cols, rows, LEFT, 3, text, STYLE_TEXT);
+    int y = render_wrapped(cells, cols, rows, LEFT, 3, text, STYLE_TEXT);
     snprintf(text, sizeof text, "Score %d: %d gold + 10 x %d experience + 100 x depth %d%s.",
              s.points, g->player.gold, g->player.xp, g->deepest,
              g->won ? " + 2000 for the win" : "");
-    render_text(cells, cols, rows, LEFT, 4, text, STYLE_TEXT);
+    y = render_wrapped(cells, cols, rows, LEFT, y, text, STYLE_TEXT);
     snprintf(text, sizeof text, "Seed %llu", (unsigned long long)g->seed);
-    render_text(cells, cols, rows, LEFT, 5, text, STYLE_TEXT_DIM);
+    render_text(cells, cols, rows, LEFT, y++, text, STYLE_TEXT_DIM);
 
-    int x = render_text(cells, cols, rows, LEFT, 7, "Enter", STYLE_KEY);
-    x = render_text(cells, cols, rows, x, 7, ": new game    ", STYLE_TEXT);
-    x = render_text(cells, cols, rows, x, 7, "q", STYLE_KEY);
-    render_text(cells, cols, rows, x, 7, ": quit", STYLE_TEXT);
+    if (!ui->touch) /* touch: buttons instead */
+    {
+        int x = render_text(cells, cols, rows, LEFT, y + 1, "Enter", STYLE_KEY);
+        x = render_text(cells, cols, rows, x, y + 1, ": new game    ", STYLE_TEXT);
+        x = render_text(cells, cols, rows, x, y + 1, "q", STYLE_KEY);
+        render_text(cells, cols, rows, x, y + 1, ": quit", STYLE_TEXT);
+        y += 2;
+    }
 
     if (!ui->scores || ui->scores->count == 0)
         return;
-    render_text(cells, cols, rows, LEFT, TABLE_TOP, "High scores", STYLE_HEADING);
+    int table_top = y + 1;
+    render_text(cells, cols, rows, LEFT, table_top, "High scores", STYLE_HEADING);
     for (int i = 0; i < ui->scores->count; i++)
     {
         const Score *e = &ui->scores->entries[i];
         snprintf(text, sizeof text, "%2d. %6d  level %2d  %s", i + 1, e->points, e->level,
                  e->cause);
-        render_text(cells, cols, rows, LEFT, TABLE_TOP + 2 + i, text,
+        render_text(cells, cols, rows, LEFT, table_top + 2 + i, text,
                     i == ui->score_rank ? STYLE_HEADING : STYLE_TEXT);
     }
 }
 
-static void render_pack(const Ui *ui, const Game *g, Cell *cells, int cols, int rows)
+static void render_pack(Ui *ui, const Game *g, Cell *cells, int cols, int rows)
 {
     enum
     {
@@ -499,28 +755,33 @@ static void render_pack(const Ui *ui, const Game *g, Cell *cells, int cols, int 
     render_text(cells, cols, rows, LEFT, 0,
                 ui->pack_purpose == PACK_USE ? "Inventory: use which item?" : "Drop which item?",
                 STYLE_HEADING);
-    render_text(cells, cols, rows, LEFT, 1,
-                ui->pack_purpose == PACK_USE ? "Its letter eats, drinks, reads, wields, wears, or "
-                                               "takes off; any other key goes back."
-                                             : "Its letter drops it; any other key goes back.",
-                STYLE_TEXT_DIM);
+    const char *hint =
+        ui->touch
+            ? (ui->pack_purpose == PACK_USE ? "Tap an item to use it." : "Tap an item to drop it.")
+        : ui->pack_purpose == PACK_USE ? "Its letter eats, drinks, reads, wields, wears, or takes "
+                                         "off; any other key goes back."
+                                       : "Its letter drops it; any other key goes back.";
+    render_text(cells, cols, rows, LEFT, 1, hint, STYLE_TEXT_DIM);
     if (p->pack_count == 0)
         render_text(cells, cols, rows, LEFT, TOP, "(your pack is empty)", STYLE_TEXT_DIM);
 
+    int h = entry_rows(ui, p->pack_count, rows - TOP - 2);
     for (int i = 0; i < p->pack_count; i++)
     {
         char name[80], letter[4] = {(char)('a' + i), ' ', '-', '\0'};
         item_name(&g->lore, &p->pack[i], name, sizeof name);
-        int x = render_text(cells, cols, rows, LEFT, TOP + i, letter, STYLE_KEY);
-        render_text(cells, cols, rows, x + 1, TOP + i, name, STYLE_TEXT);
+        int y = TOP + i * h;
+        int x = render_text(cells, cols, rows, LEFT, y, letter, STYLE_KEY);
+        render_text(cells, cols, rows, x + 1, y, name, STYLE_TEXT);
+        add_target(ui, 0, y, cols, h, 'a' + i);
     }
     char gold[32];
     snprintf(gold, sizeof gold, "Gold: %d", p->gold);
-    render_text(cells, cols, rows, LEFT, TOP + (p->pack_count > 0 ? p->pack_count : 1) + 1, gold,
-                STYLE_GOLD);
+    render_text(cells, cols, rows, LEFT, TOP + (p->pack_count > 0 ? p->pack_count * h : 1) + 1,
+                gold, STYLE_GOLD);
 }
 
-static void render_options(const Ui *ui, Cell *cells, int cols, int rows)
+static void render_options(Ui *ui, Cell *cells, int cols, int rows)
 {
     enum
     {
@@ -545,52 +806,131 @@ static void render_options(const Ui *ui, Cell *cells, int cols, int rows)
     render_clear(cells, cols, rows, STYLE_DEFAULT);
     render_text(cells, cols, rows, LEFT, 0, "Options", STYLE_HEADING);
     render_text(cells, cols, rows, LEFT, 1,
-                "Up/Down choose, Left/Right/Enter change; any other key goes back.",
+                ui->touch ? "Tap an option to change it."
+                          : "Up/Down choose, Left/Right/Enter change; any other key goes back.",
                 STYLE_TEXT_DIM);
-    render_text(cells, cols, rows, LEFT, 2, "Kept for later games. T switches real time in a game.",
+    render_text(cells, cols, rows, LEFT, 2,
+                ui->touch ? "Kept for later games."
+                          : "Kept for later games. T switches real time in a game.",
                 STYLE_TEXT_DIM);
+
+    /* Narrow screens: each value under its name. */
+    bool stacked = cols < VALUE_X + 16;
+    int text_rows = stacked ? 2 : 1;
+    int h = text_rows + (entry_rows(ui, option_count(ui), (rows - TOP) / text_rows) - 1);
     for (int i = 0; i < option_count(ui); i++)
     {
         bool chosen = i == ui->option_row;
-        render_text(cells, cols, rows, LEFT, TOP + i, chosen ? ">" : " ", STYLE_KEY);
-        render_text(cells, cols, rows, LEFT + 2, TOP + i, rows_text[i][0],
+        int y = TOP + i * h;
+        render_text(cells, cols, rows, LEFT, y, chosen ? ">" : " ", STYLE_KEY);
+        render_text(cells, cols, rows, LEFT + 2, y, rows_text[i][0],
                     chosen ? STYLE_HEADING : STYLE_TEXT);
-        render_text(cells, cols, rows, VALUE_X, TOP + i, rows_text[i][1], STYLE_KEY);
+        render_text(cells, cols, rows, stacked ? LEFT + 4 : VALUE_X, stacked ? y + 1 : y,
+                    rows_text[i][1], STYLE_KEY);
+        add_target(ui, 0, y, cols, h, UI_KEY_ROW + i);
+    }
+}
+
+/* The touch menu: one button per entry. */
+static void render_menu(Ui *ui, const Game *g, Cell *cells, int cols, int rows)
+{
+    enum
+    {
+        LEFT = 2,
+        TOP = 2,
+        WIDTH_MAX = 36,
+    };
+    MenuEntry e[6];
+    int n = menu_entries(ui, g, e);
+    render_clear(cells, cols, rows, STYLE_DEFAULT);
+    render_text(cells, cols, rows, LEFT, 0, "Menu", STYLE_HEADING);
+
+    int h = (rows - TOP) / n; /* rows per entry: a button and a gap */
+    if (h > 4)
+        h = 4;
+    int w = cols - 2 * LEFT < WIDTH_MAX ? cols - 2 * LEFT : WIDTH_MAX;
+    for (int i = 0; h > 0 && i < n; i++)
+        render_button(ui, cells, cols, rows, LEFT, TOP + i * h, w, h > 1 ? h - 1 : 1,
+                      &(Button){.label = e[i].label, .key = e[i].key});
+}
+
+/* The map screen; touch: tapping the messages opens the history. */
+static void render_map_screen(Ui *ui, const Game *g, Cell *cells, int cols, int rows)
+{
+    MapView view = {.log_lines = ui->settings ? ui->settings->log_lines : LOG_LINES_MIN,
+                    .can_exit = ui->can_exit,
+                    .no_hints = ui->touch};
+    render_game(g, cells, cols, rows, view);
+    ui->map_layout = render_map_layout(g, cols, rows, view);
+    add_target(ui, 0, 0, cols, ui->map_layout.log_rows, 'm');
+    if (ui->confirm_abandon)
+    {
+        const char *question = ui->touch
+                                   ? "Give up this game? It won't be saved or scored."
+                                   : "Give up this game? It won't be saved or scored. (y / n)";
+        int start[4], len[4];
+        int lines = render_wrap(question, cols - 1, start, len, 4);
+        render_clear(cells, cols, lines < rows ? lines : rows, STYLE_DEFAULT);
+        render_wrapped(cells, cols, rows, 1, 0, question, STYLE_HEADING);
+        ui->target_count = 0; /* only the answers */
     }
 }
 
 void ui_render(Ui *ui, const Game *g, Cell *cells, int cols, int rows)
 {
+    ui->target_count = 0;
     if (cols <= 0 || rows <= 0)
         return;
 
+    int bar = bar_rows(ui, rows);
+    int screen_rows = rows - bar;
+    Button back = {.label = "Back", .key = 27};
     switch (ui->screen)
     {
     case SCREEN_MAP:
-        render_game(g, cells, cols, rows,
-                    (MapView){.log_lines = ui->settings ? ui->settings->log_lines : LOG_LINES_MIN,
-                              .can_exit = ui->can_exit});
+        render_map_screen(ui, g, cells, cols, screen_rows);
         if (ui->confirm_abandon)
-        {
-            render_clear(cells, cols, 1, STYLE_DEFAULT);
-            render_text(cells, cols, rows, 1, 0,
-                        "Give up this game? It won't be saved or scored. (y / n)", STYLE_HEADING);
-        }
+            render_bar(ui, cells, cols, rows, bar,
+                       (Button[]){{"Give up", NULL, 'y'}, {"Keep playing", "Keep", 'n'}}, 2);
+        else
+            render_bar(ui, cells, cols, rows, bar,
+                       (Button[]){{"Items", "Inv", 'i'},
+                                  {"Drop", NULL, 'x'},
+                                  {"Stairs", "><", UI_KEY_STAIRS},
+                                  {"Rest", NULL, 'Z'},
+                                  {"Menu", NULL, UI_KEY_MENU}},
+                       5);
         break;
     case SCREEN_HELP:
-        render_help(ui, g, cells, cols, rows);
+        render_help(ui, g, cells, cols, screen_rows);
+        render_bar(ui, cells, cols, rows, bar, &back, 1);
         break;
     case SCREEN_LOG:
-        render_history(ui, g, cells, cols, rows);
+        render_history(ui, g, cells, cols, screen_rows);
+        render_bar(
+            ui, cells, cols, rows, bar,
+            (Button[]){{"Older", NULL, UI_KEY_PAGE_UP}, {"Newer", NULL, UI_KEY_PAGE_DOWN}, back},
+            3);
         break;
     case SCREEN_END:
-        render_end(ui, g, cells, cols, rows);
+        render_end(ui, g, cells, cols, screen_rows);
+        if (ui->can_exit)
+            render_bar(ui, cells, cols, rows, bar,
+                       (Button[]){{"New game", "New", '\n'}, {"Quit", NULL, 'q'}}, 2);
+        else
+            render_bar(ui, cells, cols, rows, bar, &(Button){"New game", NULL, '\n'}, 1);
         break;
     case SCREEN_PACK:
-        render_pack(ui, g, cells, cols, rows);
+        render_pack(ui, g, cells, cols, screen_rows);
+        render_bar(ui, cells, cols, rows, bar, &back, 1);
         break;
     case SCREEN_OPTIONS:
-        render_options(ui, cells, cols, rows);
+        render_options(ui, cells, cols, screen_rows);
+        render_bar(ui, cells, cols, rows, bar, &back, 1);
+        break;
+    case SCREEN_MENU:
+        render_menu(ui, g, cells, cols, screen_rows);
+        render_bar(ui, cells, cols, rows, bar, &back, 1);
         break;
     }
 }

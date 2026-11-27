@@ -51,6 +51,20 @@ The game saves itself on every new depth and when the window or tab closes (or t
 
 The options (`o`) are kept for later games: start new games in real time, real-time speed (a turn every 450, 300 or 200 ms), 2–4 message lines above the map, and in the terminal the colour mode (what the terminal reports, 256 colours, 8 colours or monochrome).
 
+### Touch screens and the mouse
+
+On a phone or tablet the browser version shows buttons along the bottom: **Items**, **Drop**, **Stairs**, **Rest** and **Menu** (help, message history, options, real time, save, give up). The map is played by tapping:
+
+| Tap | Does |
+|---|---|
+| a place on the map | walk there along the shortest known way; stops when something happens, like a run |
+| next to you | step there, or attack the monster there |
+| yourself | pick up what is here, take the stairs you stand on, or wait a turn |
+| the messages | message history |
+| an item in a list, an option | use or drop it, change it |
+
+**Stairs** walks to the stairs down you have found (up, once you carry the Sunstone); tap it again on them to take them. Any tap stops a walk. With a monster in view a walk is a single step. In the desktop window and a desktop browser, a mouse click does the same as a tap (without the buttons).
+
 When the game ends, the end screen shows your score and the high scores; Enter starts a new game and `q` quits. On the help and history screens, any key goes back (in the history, the arrows, PgUp/PgDn and Home/End scroll).
 
 ## Layout
@@ -62,7 +76,7 @@ src/core/            game logic in pure C: no I/O, no globals, deterministic per
   gen_cave           cellular-automaton caves, trimmed to one connected region
   gen_rooms          rectangular rooms joined by L-shaped corridors
   level              one level: generator by depth, stairs placement
-  path               distance maps (breadth-first search)
+  path               distance maps (breadth-first search), over all floor or known floor only
   combat             stats, hit chance, damage
   monster            the monster table and monster instances
   ai                 what a monster does on its turn
@@ -76,7 +90,7 @@ src/core/            game logic in pure C: no I/O, no globals, deterministic per
   game               game state, actions, rules
   msglog             message log (ring buffer, repeats counted)
   render             game state -> grid of cells (glyph + style); the colour palette
-  ui                 keymap and screens (map, help, history, inventory, options, end), shared by all frontends
+  ui                 keymap, taps and screens (map, help, history, inventory, options, menu, end), touch buttons; shared by all frontends
 src/platform/term/   ncurses frontend
 src/platform/raylib/ raylib frontend: desktop window and browser (Emscripten)
 src/platform/common/ shared by the frontends: storing scores, options and the save (files or localStorage)
@@ -102,8 +116,10 @@ tests/               unit tests of the core (no ncurses or raylib needed)
 - **Field of view:** one Bresenham ray from the player to every cell on the square of radius 10, cut to a circle. A ray lights each cell it passes, including the first wall it hits, then stops. Casting to the whole perimeter (instead of at fixed angles) leaves no holes at any distance. A last pass lights walls whose ray was blocked by another wall although the floor in front of them is in view (about one wall in five otherwise stays dark).
 - **Saving:** every field of the game (all ten levels, monsters, items, the pack, what's identified, the message log, the random-number state) is written in a fixed order as little-endian integers, followed by a checksum, and stored as base64 text: about 70 KB. Loading checks the checksum and every count, index and position, so a damaged or edited save is refused rather than read out of bounds. A loaded game continues exactly as it would have.
 - **Running:** in a corridor the run turns with it while there is exactly one way on; in the open it goes straight and stops where the walls beside it change (a doorway) or between corridor and room.
+- **Walking to a tapped cell:** a distance map from the target over explored floor only (so it never routes through the unknown); each step goes to the neighbour one step nearer, of those the one nearest the target as the crow flies, which gives diagonal-then-straight paths rather than zigzags. It stops like a run: on arrival, a message, lost HP or a monster in view.
+- **Touch layout:** the core records every button and list line it draws as a tap area; the frontend only turns a tap into a cell. On narrow screens messages wrap, the status line shortens (keeping hunger and effects), and option values go under their names.
 - **Fog of war:** cells seen once stay on the map, drawn in cool blue; what is in view is drawn in warm light.
-- **One palette, one keymap:** the core defines the colour of every style and handles keys and screens; the frontends only translate key codes and draw cells. The terminal uses the nearest xterm-256 colours (or 8 basic ones).
+- **One palette, one keymap:** the core defines the colour of every style and handles keys, taps and screens; the frontends only translate key codes and taps and draw cells. The terminal uses the nearest xterm-256 colours (or 8 basic ones).
 
 ## Links
 

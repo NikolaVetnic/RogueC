@@ -11,5 +11,7 @@
  * cell over walkable cells, 8 directions like the player; -1 where it can't be
  * reached. Breadth-first search. Returns false if out of memory. */
 bool path_distances(const Map *m, Vec2 from, int *dist);
+/* The same over explored cells only: the ways the player knows. */
+bool path_distances_known(const Map *m, Vec2 from, int *dist);
 
 #endif

@@ -130,7 +130,7 @@ static void screens_survive_tiny_sizes(void)
     Ui ui;
     Settings settings = settings_default();
     open_game(&g);
-    for (Screen s = SCREEN_MAP; s <= SCREEN_OPTIONS; s++)
+    for (Screen s = SCREEN_MAP; s <= SCREEN_MENU; s++)
         for (int c = 0; c <= 3; c++)
             for (int r = 0; r <= 3; r++)
             {

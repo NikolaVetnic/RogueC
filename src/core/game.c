@@ -193,7 +193,7 @@ bool game_init(Game *g, uint64_t seed)
     for (size_t i = 0; i < sizeof KIT / sizeof KIT[0]; i++)
         inv_add(&g->player, KIT[i]);
     msglog_clear(&g->log);
-    msglog_add(&g->log, g->turn, "You enter the dungeon. Press ? for help.");
+    msglog_add(&g->log, g->turn, "You enter the dungeon.");
     enter_level(g, 1, g->levels[0].stairs_up);
     return true;
 }
@@ -539,11 +539,65 @@ static bool run_step(Game *g)
            level_item_at(game_level(g), at) < 0 && r->steps < RUN_MAX;
 }
 
-/* Runs turn-based to the end, or in real time while the player is ready. */
+/* ---- travel ----------------------------------------------------------------- */
+
+/* The next step towards run.target on a shortest known way: of the neighbours
+ * one step nearer, the one nearest the target as the crow flies (diagonal
+ * first, then straight, not a zigzag). -1 if there is no known way. */
+static int travel_dir(const Game *g)
+{
+    const Map *m = g->map;
+    Vec2 at = g->player.pos, to = g->run.target;
+    int *dist = malloc((size_t)m->w * (size_t)m->h * sizeof *dist);
+    if (!dist || !path_distances_known(m, to, dist))
+    {
+        free(dist);
+        return -1;
+    }
+
+    int here = map_in_bounds(m, at.x, at.y) ? dist[at.y * m->w + at.x] : -1;
+    int best = -1;
+    long best_len = 0;
+    for (int d = 0; here > 0 && d < 8; d++)
+    {
+        Vec2 n = vec2_add(at, MOVE_DIR[d]);
+        if (!map_in_bounds(m, n.x, n.y) || dist[n.y * m->w + n.x] != here - 1)
+            continue;
+        long dx = to.x - n.x, dy = to.y - n.y, len = dx * dx + dy * dy;
+        if (best < 0 || len < best_len)
+        {
+            best = d;
+            best_len = len;
+        }
+    }
+    free(dist);
+    return best;
+}
+
+/* One step of a travel; false once it should stop: there, no known way on,
+ * or anything that stops a run (a message, lost HP, a monster in view). */
+static bool travel_step(Game *g)
+{
+    Run *r = &g->run;
+    int dir = travel_dir(g);
+    if (dir < 0)
+        return false;
+    r->dir = dir;
+
+    int serial = msglog_next_serial(&g->log), hp = g->player.hp;
+    if (!try_move(g, MOVE_DIR[dir]))
+        return false;
+    r->steps++;
+    end_action(g);
+    return !game_over(g) && msglog_next_serial(&g->log) == serial && g->player.hp >= hp &&
+           !monster_in_view(g) && !vec2_eq(g->player.pos, r->target) && r->steps < RUN_MAX;
+}
+
+/* Runs or travels turn-based to the end, or in real time while the player is ready. */
 static void run_on(Game *g)
 {
     while (g->run.active && game_ready(g))
-        if (!run_step(g))
+        if (!(g->run.travel ? travel_step(g) : run_step(g)))
             g->run.active = false;
 }
 
@@ -577,6 +631,31 @@ static bool start_run(Game *g, int dir)
         return used;
     }
     g->run = (Run){.active = true, .dir = dir};
+    run_on(g);
+    return g->run.steps > 0;
+}
+
+bool game_travel(Game *g, Vec2 to)
+{
+    if (game_over(g))
+        return false;
+    g->fresh_serial = msglog_next_serial(&g->log);
+    if (!game_ready(g))
+        return false;
+    g->run = (Run){.active = true, .travel = true, .target = to};
+    if (vec2_eq(to, g->player.pos) || travel_dir(g) < 0)
+    {
+        g->run.active = false;
+        if (!vec2_eq(to, g->player.pos))
+            msglog_add(&g->log, g->turn, "You know no way there.");
+        return false;
+    }
+    if (g->player.confused > 0 || monster_in_view(g)) /* one step */
+    {
+        bool moved = travel_step(g) || g->run.steps > 0;
+        g->run.active = false;
+        return moved;
+    }
     run_on(g);
     return g->run.steps > 0;
 }

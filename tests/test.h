@@ -51,5 +51,6 @@ void run_monster_tests(void);
 void run_item_tests(void);
 void run_progression_tests(void);
 void run_save_tests(void);
+void run_touch_tests(void);
 
 #endif

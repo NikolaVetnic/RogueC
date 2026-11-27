@@ -1,4 +1,5 @@
-/* Desktop and browser frontend: raylib window, keyboard input, cell-grid drawing.
+/* Desktop and browser frontend: raylib window, keyboard, mouse and touch input,
+ * cell-grid drawing.
  * The same file builds natively and with Emscripten (__EMSCRIPTEN__). */
 #include <math.h>
 #include <stdbool.h>
@@ -42,6 +43,12 @@ typedef struct
     int cols;
     int rows;
     bool quit;
+    bool touch;          /* a touch screen: the ui shows buttons */
+    bool finger_down;    /* web: one finger on the screen since touch_start */
+    Vector2 touch_start; /* ... where it landed, in canvas pixels */
+    bool tap_pending;    /* web: a tap at `tap` for the next frame */
+    Vector2 tap;
+    double touch_ms; /* web: time of the last touch event */
 } App;
 
 /* Command-line arguments (desktop only). */
@@ -97,8 +104,43 @@ static int special_key(int key)
     return 0;
 }
 
+/* The grid's top left corner: it is centred in the window. */
+static Vector2 grid_origin(const App *app)
+{
+    return (Vector2){(float)((GetScreenWidth() - app->cols * app->cell_w) / 2),
+                     (float)((GetScreenHeight() - app->rows * app->cell_h) / 2)};
+}
+
+/* A tap or click at pixel p: to the ui as a cell, if it is on the grid. */
+static void tap_at(App *app, Vector2 p)
+{
+    Vector2 o = grid_origin(app);
+    if (p.x < o.x || p.y < o.y)
+        return;
+    int x = (int)((p.x - o.x) / (float)app->cell_w), y = (int)((p.y - o.y) / (float)app->cell_h);
+    if (x >= app->cols || y >= app->rows)
+        return;
+    ui_tap(&app->ui, &app->game, x, y);
+    if (!app->game.running)
+        app->quit = true;
+}
+
 static void handle_input(App *app)
 {
+    /* Mouse: raylib reports clicks in the same pixels it draws in. It reports
+     * touches as clicks too; those come through on_touch instead. */
+    bool from_touch = false;
+#ifdef __EMSCRIPTEN__
+    from_touch = emscripten_get_now() - app->touch_ms < 1000.0;
+#endif
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !from_touch)
+        tap_at(app, GetMousePosition());
+    if (app->tap_pending) /* web touch: see on_touch */
+    {
+        app->tap_pending = false;
+        tap_at(app, app->tap);
+    }
+
     for (int ch = GetCharPressed(); ch != 0; ch = GetCharPressed())
         press(app, ch);
 
@@ -184,9 +226,8 @@ static Color color(Rgb c)
 
 static void draw(const App *app)
 {
-    /* Centre the grid in the window. */
-    int ox = (GetScreenWidth() - app->cols * app->cell_w) / 2;
-    int oy = (GetScreenHeight() - app->rows * app->cell_h) / 2;
+    Vector2 o = grid_origin(app);
+    int ox = (int)o.x, oy = (int)o.y;
     float text_dy = ((float)app->cell_h - app->font_size) / 2.0f;
 
     BeginDrawing();
@@ -218,6 +259,7 @@ static void draw(const App *app)
 static void new_ui(App *app)
 {
     ui_init(&app->ui, &app->scores, &app->settings);
+    app->ui.touch = app->touch;
 #ifndef __EMSCRIPTEN__
     app->ui.can_exit = true; /* a page can't close itself */
 #endif
@@ -264,6 +306,44 @@ static const char *on_before_unload(int type, const void *reserved, void *arg)
     (void)reserved;
     save_on_exit(arg);
     return NULL; /* no "leave this page?" question */
+}
+
+/* Touches, handled here rather than by raylib: one finger lifted near where it
+ * landed is a tap there (a slide is not). The first touch turns on the touch
+ * buttons. Returning true stops the browser making mouse events of it too. */
+static bool on_touch(int type, const EmscriptenTouchEvent *e, void *arg)
+{
+    App *app = arg;
+    app->touch_ms = emscripten_get_now();
+    if (!app->touch)
+        app->touch = app->ui.touch = true;
+
+    const EmscriptenTouchPoint *t = NULL;
+    for (int i = 0; i < e->numTouches && !t; i++)
+        if (e->touches[i].isChanged)
+            t = &e->touches[i];
+    if (!t)
+        return true;
+    Vector2 p = {(float)t->targetX * app->scale, (float)t->targetY * app->scale};
+
+    if (type == EMSCRIPTEN_EVENT_TOUCHSTART)
+    {
+        app->finger_down = e->numTouches == 1;
+        app->touch_start = p;
+    }
+    else if (type == EMSCRIPTEN_EVENT_TOUCHEND && app->finger_down)
+    {
+        app->finger_down = false;
+        if (fabsf(p.x - app->touch_start.x) < 1.5f * (float)app->cell_w &&
+            fabsf(p.y - app->touch_start.y) < 1.5f * (float)app->cell_h)
+        {
+            app->tap_pending = true;
+            app->tap = app->touch_start;
+        }
+    }
+    else
+        app->finger_down = false;
+    return true;
 }
 
 /* Phones may close a hidden tab without an unload event: save when hidden. */
@@ -365,6 +445,10 @@ int main(int argc, char **argv)
     Args opt = parse_args(argc, argv);
 
     app.use_store = !opt.screenshot;
+#ifdef __EMSCRIPTEN__
+    /* A phone or tablet: buttons from the start, not only after the first touch. */
+    app.touch = emscripten_run_script_int("matchMedia('(pointer: coarse)').matches ? 1 : 0") != 0;
+#endif
     app.settings = app.use_store ? store_load_settings() : settings_default();
     if (app.use_store)
         store_load_scores(&app.scores);
@@ -388,6 +472,9 @@ int main(int argc, char **argv)
 #ifdef __EMSCRIPTEN__
     emscripten_set_beforeunload_callback(&app, on_before_unload);
     emscripten_set_visibilitychange_callback(&app, false, on_visibility_change);
+    emscripten_set_touchstart_callback("#canvas", &app, false, on_touch);
+    emscripten_set_touchend_callback("#canvas", &app, false, on_touch);
+    emscripten_set_touchcancel_callback("#canvas", &app, false, on_touch);
     emscripten_set_main_loop_arg(frame, &app, 0, true); /* never returns */
 #else
     /* START_COLS x START_ROWS cells, or less on a small screen */

@@ -40,6 +40,7 @@ typedef enum
     ACTION_RUN_SW,
     ACTION_RUN_W,
     ACTION_RUN_NW,
+    ACTION_TRAVEL, /* walk to a cell over known ground: game_travel */
     ACTION_QUIT,
 } Action;
 
@@ -100,11 +101,13 @@ enum
     RUN_MAX = 200,          /* steps one run can last */
 };
 
-/* A run in progress (not saved). */
+/* A run or a travel in progress (not saved). */
 typedef struct
 {
     bool active;
-    int dir;   /* 0-7, clockwise from north */
+    bool travel; /* walking to `target`, not running straight */
+    Vec2 target;
+    int dir;   /* 0-7, clockwise from north; travel: the last step's */
     int steps; /* taken so far */
     bool room; /* the last step ended in the open, not in a corridor */
     int sides; /* in the open: which cells beside the path were floor */
@@ -147,6 +150,10 @@ void game_free(Game *g);
 bool game_step(Game *g, Action a);
 /* game_step for actions on a pack item (ACTION_USE, ACTION_DROP). */
 bool game_step_item(Game *g, Action a, int item);
+/* Walks to `to` over explored floor, step by step until there or until
+ * something happens (as a run stops). With a monster in view or confused it is
+ * one step. Returns true if it used a turn; says so if there is no known way. */
+bool game_travel(Game *g, Vec2 to);
 /* The player has the energy to act. */
 bool game_ready(const Game *g);
 /* Dead or won: nothing more happens. */
@@ -157,8 +164,8 @@ bool game_has_goal(const Game *g);
 /* One tick of the world: monsters act, the player gains energy and heals. */
 void game_tick(Game *g);
 void game_set_realtime(Game *g, bool on);
-/* A run is under way. Turn-based runs finish inside game_step; in real time
- * call game_run_continue whenever the player is ready. */
+/* A run or travel is under way. Turn-based ones finish inside game_step and
+ * game_travel; in real time call game_run_continue whenever the player is ready. */
 bool game_run_active(const Game *g);
 /* Real time: the run's next step, if the player is ready. */
 void game_run_continue(Game *g);
